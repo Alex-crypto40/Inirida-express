@@ -1,0 +1,312 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { getStores } from "../services/api.js";
+import StoreCard from "../components/StoreCard";
+import MotocarroForm from "../components/MotocarroForm";
+
+function Home() {
+  const [stores, setStores] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busqueda, setBusqueda] = useState("");
+  const [menuAbierto, setMenuAbierto] = useState(false);
+  const [categoriaSeleccionada, setCategoriaSeleccionada] =
+    useState("restaurante");
+
+  const navigate = useNavigate();
+
+  const categoriasGlobales = [
+    { id: "turismo", label: "Turismo", icon: "🌴" },
+    { id: "restaurante", label: "Restaurantes", icon: "🍔" },
+    { id: "licorera", label: "Licoreras", icon: "🍺" },
+    { id: "hotel", label: "Hoteles", icon: "🏨" },
+    { id: "motocarro", label: "Motocarro", icon: "🛺" },
+    { id: "mandados", label: "Mandados", icon: "🛵" },
+  ];
+
+  useEffect(() => {
+    setLoading(true);
+    getStores(categoriaSeleccionada)
+      .then((data) => {
+        setStores(Array.isArray(data) ? data : []);
+      })
+      .catch((error) => console.error("Error al traer comercios:", error))
+      .finally(() => setLoading(false));
+  }, [categoriaSeleccionada]);
+
+  const comerciosFiltrados = stores.filter((store) => {
+    return store.name?.toLowerCase().includes(busqueda.toLowerCase());
+  });
+
+  const irAFormularioComercio = () => {
+    setMenuAbierto(false);
+    navigate("/register-store");
+  };
+
+  const irAFormularioRepartidor = () => {
+    setMenuAbierto(false);
+    navigate("/driver-login");
+  };
+
+  const cerrarSesion = () => {
+    setMenuAbierto(false);
+    localStorage.removeItem("token");
+    window.location.reload();
+  };
+
+  return (
+    <div className="max-w-md mx-auto bg-white min-h-screen flex flex-col relative shadow-2xl">
+      {/* 1. HEADER MODERNO */}
+      <header className="bg-gradient-to-r from-orange-500 to-orange-600 text-white p-4 flex items-center justify-between sticky top-0 z-20 shadow-sm">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl">🛵</span>
+          <div>
+            <h1 className="font-black text-lg tracking-tight leading-none">
+              Inírida Express
+            </h1>
+            <p className="text-[10px] text-orange-100 font-medium mt-0.5">
+              Tu ciudad a un clic
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <button className="bg-white/20 hover:bg-white/30 backdrop-blur-md p-2 rounded-xl text-sm transition-all active:scale-95">
+            🛒
+          </button>
+
+          <button
+            onClick={() => setMenuAbierto(true)}
+            className="bg-white/20 hover:bg-white/30 backdrop-blur-md p-2 rounded-xl text-white font-bold text-base transition-all active:scale-95 cursor-pointer"
+          >
+            ☰
+          </button>
+        </div>
+      </header>
+
+      {/* 2. MENÚ LATERAL MEJORADO (DRAWER PREMIUM) */}
+      {menuAbierto && (
+        <div
+          onClick={() => setMenuAbierto(false)}
+          className="absolute inset-0 bg-black/60 backdrop-blur-xs z-30 transition-all duration-300"
+        />
+      )}
+
+      <aside
+        className={`absolute top-0 right-0 h-full w-72 bg-slate-50 z-40 shadow-2xl flex flex-col justify-between transition-transform duration-300 ease-out ${
+          menuAbierto ? "translate-x-0" : "translate-x-full"
+        }`}
+      >
+        <div className="flex flex-col h-full justify-between">
+          {/* PARTE SUPERIOR */}
+          <div>
+            {/* Header del Menú */}
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-5 text-white relative rounded-b-3xl shadow-md">
+              <button
+                onClick={() => setMenuAbierto(false)}
+                className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold transition-all"
+              >
+                ✕
+              </button>
+
+              <div className="flex items-center gap-3 mt-2">
+                <div className="w-12 h-12 bg-white text-orange-500 rounded-full flex items-center justify-center text-xl font-black shadow">
+                  IE
+                </div>
+
+                <div>
+                  <h3 className="font-semibold text-lg leading-tight">
+                    Inírida Express
+                  </h3>
+                  <p className="text-sm text-white/80">Menú de opciones</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Opciones */}
+            <nav className="p-5 space-y-3 bg-gray-50">
+              {/* INICIO */}
+              <button
+                onClick={() => setMenuAbierto(false)}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                    🏠
+                  </span>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">
+                      Inicio
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Ver comercios disponibles
+                    </p>
+                  </div>
+                </div>
+                <span className="text-gray-400 text-lg">›</span>
+              </button>
+
+              {/* VENDER */}
+              <button
+                onClick={irAFormularioComercio}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                    💼
+                  </span>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">
+                      ¿Quieres vender?
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Registra tu negocio o local
+                    </p>
+                  </div>
+                </div>
+                <span className="text-orange-500 font-bold text-lg">›</span>
+              </button>
+
+              {/* REPARTIDOR */}
+              <button
+                onClick={irAFormularioRepartidor}
+                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                    🛵
+                  </span>
+                  <div>
+                    <p className="font-semibold text-gray-800 text-sm">
+                      ¡Trabaja con nosotros!
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      Súmate como domiciliario
+                    </p>
+                  </div>
+                </div>
+                <span className="text-orange-500 font-bold text-lg">›</span>
+              </button>
+            </nav>
+          </div>
+
+          {/* FOOTER */}
+          <div className="p-5 border-t border-gray-100 bg-white space-y-3">
+            <button
+              onClick={cerrarSesion}
+              className="w-full py-3 rounded-xl bg-red-50 text-red-500 font-semibold hover:bg-red-100 hover:scale-[1.01] transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>🚪</span> Cerrar sesión
+            </button>
+
+            <p className="text-[11px] text-center text-gray-400 font-medium">
+              Inírida Express v1.0 • 2026
+            </p>
+          </div>
+        </div>
+      </aside>
+
+      {/* CUERPO PRINCIPAL */}
+      <div className="p-4 flex flex-col gap-4 flex-1">
+        {/* BUSCADOR */}
+        <div className="relative">
+          <input
+            type="text"
+            placeholder={`🔍 Buscar en ${categoriaSeleccionada}...`}
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            className="w-full p-3 pl-4 rounded-xl bg-gray-100 border border-transparent text-sm focus:border-orange-500 focus:bg-white transition-all outline-none"
+          />
+        </div>
+
+        {/* BARRA DE CATEGORÍAS - SCROLL HABILITADO */}
+        <div className="w-full overflow-x-auto no-scrollbar py-1">
+          <div className="flex gap-2 min-w-max px-1">
+            {categoriasGlobales.map((cat) => (
+              <button
+                key={cat.id}
+                type="button"
+                onClick={() => {
+                  setCategoriaSeleccionada(cat.id);
+                  setBusqueda("");
+                }}
+                className={`py-2 px-4 rounded-xl text-xs font-bold whitespace-nowrap flex items-center gap-1.5 cursor-pointer transition-all ${
+                  categoriaSeleccionada === cat.id
+                    ? "bg-orange-500 text-white shadow-md shadow-orange-200 scale-105"
+                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                <span>{cat.icon}</span>
+                <span>{cat.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* TARJETAS / VISTA PRINCIPAL */}
+        <div className="flex-1 mt-1">
+          <h2 className="text-sm font-extrabold text-gray-800 mb-3 flex justify-between items-center">
+            <span className="capitalize">
+              {categoriaSeleccionada === "restaurante"
+                ? "Restaurantes Aliados"
+                : categoriaSeleccionada === "licorera"
+                  ? "Licoreras Disponibles"
+                  : categoriaSeleccionada === "hotel"
+                    ? "Hoteles y Hospedajes"
+                    : categoriaSeleccionada === "motocarro"
+                      ? "Servicio de Motocarro"
+                      : categoriaSeleccionada === "turismo"
+                        ? "Sitios de Turismo"
+                        : "Servicios de Mandados"}
+            </span>
+            <span className="text-[11px] bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-md">
+              {categoriaSeleccionada === "motocarro"
+                ? "Solicitud directa"
+                : `${comerciosFiltrados.length} opciones`}
+            </span>
+          </h2>
+
+          {/* EVALUACIÓN DE VISTA Y RENDERIZADO */}
+          {categoriaSeleccionada === "motocarro" ? (
+            <MotocarroForm />
+          ) : loading ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-3">
+              <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-xs text-gray-400 font-medium">
+                Cargando opciones...
+              </p>
+            </div>
+          ) : comerciosFiltrados.length === 0 ? (
+            <div className="text-center py-14 text-gray-400 bg-gray-50 rounded-2xl p-6 border border-dashed border-gray-200">
+              <p className="text-2xl">📍</p>
+              <p className="text-sm font-bold text-gray-600 mt-2">
+                No hay comercios o servicios en esta categoría
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Pronto verás más opciones disponibles.
+              </p>
+            </div>
+          ) : (
+            <div
+              className={`grid gap-4 ${
+                categoriaSeleccionada === "hotel" ||
+                categoriaSeleccionada === "mandados"
+                  ? "grid-cols-1"
+                  : "grid-cols-2"
+              }`}
+            >
+              {comerciosFiltrados.map((store) => (
+                <StoreCard
+                  key={store._id}
+                  store={store}
+                  category={categoriaSeleccionada}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default Home;

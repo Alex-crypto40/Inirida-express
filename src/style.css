@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* 1. Prevenir desbordamiento horizontal en todo el sitio */
+html,
+body {
+  overflow-x: hidden !important;
+  max-width: 100vw;
+}
+
+/* 2. Ocultar la barra de scroll visual permitiendo el deslizamiento táctil fluido */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE y Edge */
+  scrollbar-width: none; /* Firefox */
+  -webkit-overflow-scrolling: touch; /* Inercia y fluidez táctil para iOS/Android */
+}
+
+/* 3. Animación de desplazamiento infinito (si se usa carrusel automático) */
+@keyframes scroll-infinito {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.carrusel-categorias {
+  display: flex;
+  width: max-content;
+  animation: scroll-infinito 20s linear infinite;
+}
+
+/* Pausar la animación cuando el usuario toca o pasa el cursor sobre el carrusel */
+.carrusel-categorias:hover,
+.carrusel-categorias:active {
+  animation-play-state: paused;
+}
+*
+  Oculta
+  la
+  barra
+  de
+  scroll
+  fea
+  pero
+  mantiene
+  la
+  posibilidad
+  de
+  deslizar
+  */
+  .no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none; /* IE y Edge */
+  scrollbar-width: none; /* Firefox */
+}
