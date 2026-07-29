@@ -37,7 +37,6 @@ function App() {
   return (
     <CartProvider>
       <div className="bg-gray-50 min-h-screen flex flex-col w-full">
-      
         <main className="max-w-md w-full mx-auto flex-1 overflow-x-hidden">
           {/* Intercambio de pantallas */}
           <Routes>

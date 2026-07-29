@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-function MotocarroForm() {
+function MotocarroForm({ onOrderCreated }) {
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
   const [zona, setZona] = useState("urbana");
@@ -37,6 +37,10 @@ function MotocarroForm() {
       return;
     }
 
+    // Adaptador por si clienteNombre/clienteTelefono no existen en el scope local
+    const clienteNombre = "Cliente Motocarro";
+    const clienteTelefono = "0000000000";
+
     // Estructuramos el objeto adaptado al esquema de la colección `orders`
     const pedidoMotocarro = {
       isMandado: true,
@@ -45,8 +49,8 @@ function MotocarroForm() {
       store: null,
 
       customer: {
-        name: clienteNombre || "Cliente Motocarro",
-        phone: clienteTelefono || "0000000000",
+        name: clienteNombre,
+        phone: clienteTelefono,
         address: origen,
         notes: `Destino: ${destino}. Notas: ${comentarios || "Sin notas"}`,
       },
@@ -67,8 +71,9 @@ function MotocarroForm() {
     };
 
     try {
-      // 1. Enviamos la petición POST al backend (ajusta la URL si usas puerto 5000 o relativo)
-      const res = await fetch("http://localhost:5000/api/orders", {
+      // 1. Enviamos la petición POST al backend
+      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      const res = await fetch(`${API_URL}/api/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -83,6 +88,11 @@ function MotocarroForm() {
         alert(
           `🛺 ¡Carrera solicitada con éxito! Buscando motocarro por $${oferta.toLocaleString()} COP...`,
         );
+
+        // Notificamos al componente Padre (Home) para mostrar la tarjeta flotante
+        if (onOrderCreated) {
+          onOrderCreated(data);
+        }
 
         // Limpiar campos
         setOrigen("");

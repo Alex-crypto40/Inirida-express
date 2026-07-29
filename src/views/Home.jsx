@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { getStores } from "../services/api.js";
 import StoreCard from "../components/StoreCard";
 import MotocarroForm from "../components/MotocarroForm";
+import OrderStatusWidget from "../components/OrderStatusWidget";
 
 function Home() {
   const [stores, setStores] = useState([]);
@@ -12,7 +13,11 @@ function Home() {
   const [categoriaSeleccionada, setCategoriaSeleccionada] =
     useState("restaurante");
 
+  // Estado para controlar la solicitud de motocarro activa
+  const [activeOrder, setActiveOrder] = useState(null);
+
   const navigate = useNavigate();
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
 
   const categoriasGlobales = [
     { id: "turismo", label: "Turismo", icon: "🌴" },
@@ -22,6 +27,50 @@ function Home() {
     { id: "motocarro", label: "Motocarro", icon: "🛺" },
     { id: "mandados", label: "Mandados", icon: "🛵" },
   ];
+
+  // Consulta periódica del estado de la carrera
+  useEffect(() => {
+    if (!activeOrder?._id) return;
+
+    const checkOrderStatus = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/orders/${activeOrder._id}`);
+        if (res.ok) {
+          const updatedOrder = await res.json();
+          setActiveOrder(updatedOrder);
+
+          if (
+            updatedOrder.status === "completed" ||
+            updatedOrder.status === "cancelled"
+          ) {
+            setTimeout(() => setActiveOrder(null), 5000);
+          }
+        }
+      } catch (error) {
+        console.error("Error al actualizar el estado de la orden:", error);
+      }
+    };
+
+    const interval = setInterval(checkOrderStatus, 4000);
+    return () => clearInterval(interval);
+  }, [activeOrder?._id, API_URL]);
+
+  // Cancelar carrera desde la tarjeta flotante
+  const handleCancelOrder = async (orderId) => {
+    try {
+      const res = await fetch(`${API_URL}/api/orders/${orderId}/cancel`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (res.ok) {
+        alert("Carrera cancelada correctamente.");
+        setActiveOrder(null);
+      }
+    } catch (error) {
+      console.error("Error al cancelar la orden:", error);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -267,7 +316,9 @@ function Home() {
 
           {/* EVALUACIÓN DE VISTA Y RENDERIZADO */}
           {categoriaSeleccionada === "motocarro" ? (
-            <MotocarroForm />
+            <MotocarroForm
+              onOrderCreated={(newOrder) => setActiveOrder(newOrder)}
+            />
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
@@ -305,6 +356,12 @@ function Home() {
           )}
         </div>
       </div>
+
+      {/* TARJETA FLOTANTE DE SEGUIMIENTO PARA EL CLIENTE */}
+      <OrderStatusWidget
+        activeOrder={activeOrder}
+        onCancelOrder={handleCancelOrder}
+      />
     </div>
   );
 }
