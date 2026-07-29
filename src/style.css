@@ -11,6 +11,7 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
 .no-scrollbar {
   -ms-overflow-style: none; /* IE y Edge */
   scrollbar-width: none; /* Firefox */
@@ -37,25 +38,4 @@ body {
 .carrusel-categorias:hover,
 .carrusel-categorias:active {
   animation-play-state: paused;
-}
-*
-  Oculta
-  la
-  barra
-  de
-  scroll
-  fea
-  pero
-  mantiene
-  la
-  posibilidad
-  de
-  deslizar
-  */
-  .no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none; /* IE y Edge */
-  scrollbar-width: none; /* Firefox */
 }
