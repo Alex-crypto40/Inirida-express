@@ -84,7 +84,7 @@ app.use(express.static(path.join(__dirname, "dist")));
 
 // 🌐 6. Captura de rutas SPA (React Router)
 // Cualquier petición que NO coincida con la API, responderá con el index.html de React
-app.get("*", (req, res) => {
+app.get("/*splat", (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
