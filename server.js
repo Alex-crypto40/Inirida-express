@@ -5,8 +5,14 @@ import express from "express";
 import cors from "cors";
 import http from "http"; // 👈 Importamos el módulo HTTP nativo de Node.js
 import { Server } from "socket.io"; // 👈 Importamos Socket.io
+import path from "path"; // 👈 Módulo para resolver rutas de archivos
+import { fileURLToPath } from "url"; // 👈 Requerido para __dirname en ES Modules
 
-// 2. Importaciones locales
+// 2. Definición de __dirname para ES Modules (import)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 3. Importaciones locales
 import "./backend/db.js";
 import storeRoutes from "./backend/storeRoutes.js";
 import productRoutes from "./backend/productRoutes.js";
@@ -20,7 +26,10 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 🛠️ 3. Creación del servidor HTTP wrapper para WebSockets
+// Servir los archivos estáticos construidos por Vite / React (dist o public)
+app.use(express.static(path.join(__dirname, "dist")));
+
+// 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -29,7 +38,7 @@ const io = new Server(server, {
   },
 });
 
-// 🔌 4. Lógica de comunicación en tiempo real (Chat Triangular por Pedido)
+// 🔌 5. Lógica de comunicación en tiempo real (Chat Triangular por Pedido)
 io.on("connection", (socket) => {
   console.log(`⚡ Usuario conectado al WebSocket: ${socket.id}`);
 
@@ -67,16 +76,17 @@ io.on("connection", (socket) => {
   });
 });
 
-// Ruta raíz de prueba para verificar que el servidor vive
-app.get("/", (req, res) => {
-  res.send("API y WebSockets de Inírida Express funcionando correctamente 🚀");
-});
-
 // Rutas de la API
 app.use("/api/stores", storeRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
+
+// 🌐 Ruta comodín (Catch-all) para Single Page Application (React Router)
+// Cualquier petición GET que no sea una API redirige al index.html
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
 
 // Puerto
 const PORT = process.env.PORT || 5000;
