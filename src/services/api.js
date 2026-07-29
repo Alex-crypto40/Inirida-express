@@ -1,5 +1,6 @@
 // Usa la variable de entorno en producción (Render) o la IP local por defecto en desarrollo
-const API_URL = import.meta.env.VITE_API_URL || "http://192.168.1.245:5000/api";
+const API_URL =
+  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
 
 // Obtener todos los productos
 export const getProducts = async () => {
