@@ -5,8 +5,6 @@ import express from "express";
 import cors from "cors";
 import http from "http"; // 👈 Importamos el módulo HTTP nativo de Node.js
 import { Server } from "socket.io"; // 👈 Importamos Socket.io
-import path from "path"; // 👈 Para manejar las rutas de archivos
-import { fileURLToPath } from "url"; // 👈 Para obtener __dirname en ESM
 
 // 2. Importaciones locales
 import "./backend/db.js";
@@ -17,10 +15,6 @@ import orderRoutes from "./backend/orderRoutes.js";
 import Message from "./backend/Message.js"; // 👈 Importamos el modelo para guardar los mensajes
 
 const app = express();
-
-// Configuración de __dirname para ECMAScript Modules (ESM)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Middlewares
 app.use(cors());
@@ -73,25 +67,21 @@ io.on("connection", (socket) => {
   });
 });
 
-// Rutas de la API (Tienen prioridad)
+// Ruta raíz de prueba para verificar que el servidor vive
+app.get("/", (req, res) => {
+  res.send("API y WebSockets de Inírida Express funcionando correctamente 🚀");
+});
+
+// Rutas de la API
 app.use("/api/stores", storeRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
 
-// 📁 5. Servir los archivos estáticos de la compilación de React (carpeta dist)
-app.use(express.static(path.join(__dirname, "dist")));
-
-// 🌐 6. Captura de rutas SPA (React Router)
-// Cualquier petición que NO coincida con la API, responderá con el index.html de React
-app.get("/*splat", (req, res) => {
-  res.sendFile(path.join(__dirname, "dist", "index.html"));
-});
-
 // Puerto
 const PORT = process.env.PORT || 5000;
 
-// 🚀 IMPORTANTE: Mantenemos server.listen para habilitar WebSockets y Express
+// 🚀 Mantenemos server.listen para habilitar WebSockets y Express
 server.listen(PORT, "0.0.0.0", () => {
   console.log(
     `🚀 Servidor e infraestructura de WebSockets corriendo en puerto ${PORT}`,

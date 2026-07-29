@@ -1,5 +1,5 @@
-// Cambiamos localhost por tu IP para que el celular tenga acceso al backend
-const API_URL = "http://192.168.1.245:5000/api";
+// Usa la variable de entorno en producción (Render) o la IP local por defecto en desarrollo
+const API_URL = import.meta.env.VITE_API_URL || "http://192.168.1.245:5000/api";
 
 // Obtener todos los productos
 export const getProducts = async () => {
@@ -9,7 +9,6 @@ export const getProducts = async () => {
 
 // Obtener las tiendas filtradas dinámicamente por categoría
 export const getStores = async (category) => {
-  // Si pasas categoría, la URL queda: http://192.168.1.246:5000/api/stores?category=hotel
   const url = category
     ? `${API_URL}/stores?category=${category}`
     : `${API_URL}/stores`;
