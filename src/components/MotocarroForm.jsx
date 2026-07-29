@@ -72,8 +72,9 @@ function MotocarroForm({ onOrderCreated }) {
 
     try {
       // 1. Enviamos la petición POST al backend
-      const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
-      const res = await fetch(`${API_URL}/api/orders`, {
+      const API_BASE =
+        import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+      const res = await fetch(`${API_BASE}/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
