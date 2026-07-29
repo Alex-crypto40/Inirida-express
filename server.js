@@ -84,7 +84,7 @@ app.use("/api/orders", orderRoutes);
 
 // 🌐 Ruta comodín (Catch-all) para Single Page Application (React Router)
 // Cualquier petición GET que no sea una API redirige al index.html
-app.get("*", (req, res) => {
+app.get(/(.*)/, (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
