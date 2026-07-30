@@ -60,9 +60,6 @@ const storeSchema = new mongoose.Schema(
 // 1. Permite filtrar tiendas activas por categoría ultrarrápidamente
 storeSchema.index({ status: 1, category: 1 });
 
-// 2. Búsqueda rápida por email en login
-storeSchema.index({ email: 1 });
-
 const Store = mongoose.models.Store || mongoose.model("Store", storeSchema);
 
 export default Store;
