@@ -1,6 +1,10 @@
 import { useState } from "react";
 
 function MotocarroForm({ onOrderCreated }) {
+  // 1. Añadimos estados para nombre y teléfono
+  const [nombre, setNombre] = useState("");
+  const [telefono, setTelefono] = useState("");
+
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
   const [zona, setZona] = useState("urbana");
@@ -32,25 +36,23 @@ function MotocarroForm({ onOrderCreated }) {
 
   const solicitarCarrera = async (e) => {
     e.preventDefault();
-    if (!origen.trim() || !destino.trim()) {
-      alert("Por favor ingresa el punto de recogida y el destino.");
+    if (!origen.trim() || !destino.trim() || !telefono.trim()) {
+      alert(
+        "Por favor completa los campos obligatorios (Teléfono, Origen y Destino).",
+      );
       return;
     }
-
-    // Adaptador por si clienteNombre/clienteTelefono no existen en el scope local
-    const clienteNombre = "Cliente Motocarro";
-    const clienteTelefono = "0000000000";
 
     // Estructuramos el objeto adaptado al esquema de la colección `orders`
     const pedidoMotocarro = {
       isMandado: true,
 
-      // Usa el ID real de la tienda virtual para mandados o el del req.body
+      // Enviamos null porque ya ajustaste el backend para que no sea obligatorio
       store: null,
 
       customer: {
-        name: clienteNombre,
-        phone: clienteTelefono,
+        name: nombre.trim() || "Cliente Motocarro",
+        phone: telefono.trim(),
         address: origen,
         notes: `Destino: ${destino}. Notas: ${comentarios || "Sin notas"}`,
       },
@@ -96,6 +98,8 @@ function MotocarroForm({ onOrderCreated }) {
         }
 
         // Limpiar campos
+        setNombre("");
+        setTelefono("");
         setOrigen("");
         setDestino("");
         setComentarios("");
@@ -123,6 +127,35 @@ function MotocarroForm({ onOrderCreated }) {
       </div>
 
       <form onSubmit={solicitarCarrera} className="space-y-3">
+        {/* Nombre y Teléfono (Nuevos campos) */}
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              👤 Tu Nombre
+            </label>
+            <input
+              type="text"
+              placeholder="Opcional"
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-600 mb-1">
+              📱 Celular
+            </label>
+            <input
+              type="tel"
+              placeholder="Ej: 310..."
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
+              required
+            />
+          </div>
+        </div>
+
         {/* Origen y Destino */}
         <div>
           <label className="block text-xs font-bold text-gray-600 mb-1">
