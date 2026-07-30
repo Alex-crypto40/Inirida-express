@@ -17,4 +17,7 @@ const connectDB = async () => {
   }
 };
 
+// ⚡ Llama a la función de conexión inmediatamente al importar el archivo
+connectDB();
+
 export default connectDB;
