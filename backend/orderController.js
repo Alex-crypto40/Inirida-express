@@ -120,10 +120,10 @@ export const takeOrder = async (req, res) => {
     let order = await Order.findOneAndUpdate(
       { _id: orderId, status: "pending_driver" },
       { driver: driverId, status: "assigned" },
-      { new: true },
+      { returnDocument: "after" }, // 👈 Ajustado para evitar la advertencia de Mongoose en Render
     )
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber"); // 👈 Puntos clave para que el cliente vea al conductor
+      .populate("driver", "name phone vehicleType plateNumber");
 
     if (!order) {
       return res.status(409).json({

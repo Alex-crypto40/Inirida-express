@@ -84,9 +84,10 @@ function MotocarroForm({ onOrderCreated }) {
     };
 
     try {
-      const API_BASE =
-        import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-      const res = await fetch(`${API_BASE}/orders`, {
+      const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+      const API_BASE = RAW_API.replace(/\/api\/?$/, ""); // Normaliza el endpoint
+
+      const res = await fetch(`${API_BASE}/api/orders`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

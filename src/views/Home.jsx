@@ -28,7 +28,42 @@ function Home() {
     { id: "mandados", label: "Mandados", icon: "🛵" },
   ];
 
-  // Consulta periódica del estado de la carrera
+  // 1. RECUPERAR CARRERA ACTIVA AL CARGAR / RECARGAR LA PÁGINA
+  useEffect(() => {
+    const fetchActiveCustomerOrder = async () => {
+      const savedOrderId = localStorage.getItem("activeOrderId");
+      if (!savedOrderId) return;
+
+      try {
+        const res = await fetch(`${API_URL}/api/orders/${savedOrderId}`);
+        if (res.ok) {
+          const order = await res.json();
+          if (order.status === "completed" || order.status === "cancelled") {
+            localStorage.removeItem("activeOrderId");
+            setActiveOrder(null);
+          } else {
+            setActiveOrder(order);
+          }
+        } else {
+          localStorage.removeItem("activeOrderId");
+        }
+      } catch (error) {
+        console.error("Error al recuperar orden guardada:", error);
+      }
+    };
+
+    fetchActiveCustomerOrder();
+  }, [API_URL]);
+
+  // 2. RECIBIR NUEVA ORDEN DESDE MOTOCARROFORM Y GUARDARLA EN LOCALSTORAGE
+  const handleOrderCreated = (newOrder) => {
+    if (newOrder?._id) {
+      localStorage.setItem("activeOrderId", newOrder._id);
+      setActiveOrder(newOrder);
+    }
+  };
+
+  // 3. CONSULTA PERIÓDICA DEL ESTADO DE LA CARRERA ACTIVA
   useEffect(() => {
     if (!activeOrder?._id) return;
 
@@ -43,6 +78,7 @@ function Home() {
             updatedOrder.status === "completed" ||
             updatedOrder.status === "cancelled"
           ) {
+            localStorage.removeItem("activeOrderId");
             setTimeout(() => setActiveOrder(null), 5000);
           }
         }
@@ -51,7 +87,7 @@ function Home() {
       }
     };
 
-    const interval = setInterval(checkOrderStatus, 4000);
+    const interval = setInterval(checkOrderStatus, 3000);
     return () => clearInterval(interval);
   }, [activeOrder?._id, API_URL]);
 
@@ -65,6 +101,7 @@ function Home() {
 
       if (res.ok) {
         alert("Carrera cancelada correctamente.");
+        localStorage.removeItem("activeOrderId");
         setActiveOrder(null);
       }
     } catch (error) {
@@ -99,6 +136,7 @@ function Home() {
   const cerrarSesion = () => {
     setMenuAbierto(false);
     localStorage.removeItem("token");
+    localStorage.removeItem("activeOrderId");
     window.location.reload();
   };
 
@@ -255,7 +293,7 @@ function Home() {
       </aside>
 
       {/* CUERPO PRINCIPAL */}
-      <div className="p-4 flex flex-col gap-4 flex-1">
+      <div className="p-4 flex flex-col gap-4 flex-1 pb-24">
         {/* BUSCADOR */}
         <div className="relative">
           <input
@@ -267,7 +305,7 @@ function Home() {
           />
         </div>
 
-        {/* BARRA DE CATEGORÍAS - SCROLL HABILITADO */}
+        {/* BARRA DE CATEGORÍAS */}
         <div className="w-full overflow-x-auto no-scrollbar py-1">
           <div className="flex gap-2 min-w-max px-1">
             {categoriasGlobales.map((cat) => (
@@ -316,9 +354,7 @@ function Home() {
 
           {/* EVALUACIÓN DE VISTA Y RENDERIZADO */}
           {categoriaSeleccionada === "motocarro" ? (
-            <MotocarroForm
-              onOrderCreated={(newOrder) => setActiveOrder(newOrder)}
-            />
+            <MotocarroForm onOrderCreated={handleOrderCreated} />
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
