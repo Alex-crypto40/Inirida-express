@@ -157,3 +157,20 @@ export const toggleOnlineStatus = async (req, res) => {
     res.status(500).json({ message: "Error interno del servidor." });
   }
 };
+
+// 4. Obtener perfil del repartidor
+export const getDriverProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const driver = await Driver.findById(id).select("-password");
+
+    if (!driver) {
+      return res.status(404).json({ message: "Repartidor no encontrado." });
+    }
+
+    res.json(driver);
+  } catch (error) {
+    console.error("Error al obtener perfil del repartidor:", error);
+    res.status(500).json({ message: "Error interno del servidor." });
+  }
+};
