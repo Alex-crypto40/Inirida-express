@@ -12,7 +12,7 @@ export const createOrder = async (req, res) => {
       serviceType, // "delivery", "mandado", "ride"
       store,
       customer,
-      rideDetails, // 👈 Pasajeros, maletas, mascotas
+      rideDetails, // Pasajeros, maletas, mascotas
       items,
       isMandado,
       mandadoDetail,
@@ -27,8 +27,8 @@ export const createOrder = async (req, res) => {
     const newOrder = new Order({
       serviceType: serviceType || "delivery",
       store: store || null,
-      customer: customer || req.user?._id, // Preferir id del token autenticado
-      rideDetails: serviceType === "ride" ? rideDetails : undefined, // Guardar solo si es tipo carrera
+      customer: customer || req.user?._id,
+      rideDetails: serviceType === "ride" ? rideDetails : undefined,
       items: items || [],
       isMandado: isMandado || false,
       mandadoDetail: mandadoDetail || "",
@@ -47,7 +47,7 @@ export const createOrder = async (req, res) => {
       "name address phone",
     );
 
-    // 🔴 Socket.io: Notificar a todos los repartidores sobre la nueva solicitud
+    // 🔴 Socket.io: Notificar a todos los repartidores
     const io = req.app.get("io");
     if (io) {
       io.emit("order:created", populatedOrder);
@@ -117,11 +117,13 @@ export const takeOrder = async (req, res) => {
     }
 
     // Asignación atómica (evita condiciones de carrera entre conductores)
-    const order = await Order.findOneAndUpdate(
+    let order = await Order.findOneAndUpdate(
       { _id: orderId, status: "pending_driver" },
       { driver: driverId, status: "assigned" },
       { new: true },
-    ).populate("store", "name address phone");
+    )
+      .populate("store", "name address phone")
+      .populate("driver", "name phone vehicleType plateNumber"); // 👈 Puntos clave para que el cliente vea al conductor
 
     if (!order) {
       return res.status(409).json({
@@ -130,11 +132,15 @@ export const takeOrder = async (req, res) => {
       });
     }
 
-    // 🔴 Socket.io: Remover el pedido del pool global y avisar al cliente
+    // 🔴 Socket.io: Remover del pool global y avisar al cliente en tiempo real
     const io = req.app.get("io");
     if (io) {
       io.emit("order:taken", { orderId: order._id, driverId });
+
+      // Emitir en ambos formatos para garantizar que el frontend lo escuche
       io.to(`order_${order._id}`).emit("order:status_updated", order);
+      io.to(`order_${order._id}`).emit("orderUpdated", order);
+      io.emit("order_status_updated", order);
     }
 
     res.json({
@@ -159,7 +165,10 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(400).json({ message: "Estado de servicio no válido." });
     }
 
-    const order = await Order.findOne({ _id: orderId, driver: driverId });
+    const order = await Order.findOne({
+      _id: orderId,
+      driver: driverId,
+    }).populate("driver", "name phone vehicleType plateNumber");
 
     if (!order) {
       return res.status(404).json({
@@ -190,10 +199,9 @@ export const updateOrderStatus = async (req, res) => {
     // 🔴 Socket.io: Emitir cambio de estado a las salas asociadas
     const io = req.app.get("io");
     if (io) {
-      io.to(`order_${order._id}`).emit("order:status_updated", {
-        orderId: order._id,
-        status: order.status,
-      });
+      io.to(`order_${order._id}`).emit("order:status_updated", order);
+      io.to(`order_${order._id}`).emit("orderUpdated", order);
+      io.emit("order_status_updated", order);
     }
 
     res.json({
@@ -247,7 +255,9 @@ export const getActiveDriverOrder = async (req, res) => {
     const activeOrder = await Order.findOne({
       driver: driverId,
       status: { $in: ["assigned", "at_store", "on_the_way"] },
-    }).populate("store", "name address phone");
+    })
+      .populate("store", "name address phone")
+      .populate("driver", "name phone vehicleType plateNumber");
 
     res.json({ activeOrder: activeOrder || null });
   } catch (error) {

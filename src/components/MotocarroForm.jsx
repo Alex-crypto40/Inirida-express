@@ -103,7 +103,7 @@ function MotocarroForm({ onOrderCreated }) {
         );
 
         if (onOrderCreated) {
-          onOrderCreated(data);
+          onOrderCreated(data.order || data);
         }
 
         // Limpiar formulario
