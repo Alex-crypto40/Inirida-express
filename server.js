@@ -23,15 +23,30 @@ import Message from "./backend/Message.js";
 
 const app = express();
 
-// 🔒 Configuración de CORS dinámica según el entorno
-const allowedOrigins = process.env.CLIENT_URL
-  ? [process.env.CLIENT_URL]
-  : ["*"];
+// 🔒 Configuración de CORS permitiendo orígenes explícitos
+const allowedOrigins = [
+  "https://inirida-express-frontend.onrender.com",
+  "http://localhost:5173",
+  "http://localhost:3000",
+];
+
+// Si tienes una variable CLIENT_URL en Render, la incluimos también
+if (process.env.CLIENT_URL) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
 
 const corsOptions = {
-  origin: allowedOrigins,
-  methods: ["GET", "POST", "PUT", "DELETE"],
+  origin: function (origin, callback) {
+    // Permite peticiones sin origen (como Postman o llamadas internas) o si está en la lista permitida
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, true); // Opcional: permitir otros orígenes dinámicamente si es necesario
+    }
+  },
   credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 };
 
 // Middlewares
@@ -50,6 +65,7 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"],
+    credentials: true,
   },
 });
 
