@@ -1,5 +1,14 @@
 import Driver from "./Driver.js";
 import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET =
+  process.env.JWT_SECRET || "secreto_desarrollo_cambiar_en_prod";
+
+// Generar token JWT
+const generateToken = (id) => {
+  return jwt.sign({ id }, JWT_SECRET, { expiresIn: "7d" });
+};
 
 // 1. Registro de Domiciliarios
 export const registerDriver = async (req, res) => {
@@ -7,27 +16,18 @@ export const registerDriver = async (req, res) => {
     const { name, phone, email, password, vehicleType, vehiclePlate } =
       req.body;
 
-    // --- VALIDACIÓN DE CAMPOS REQUERIDOS ---
-    if (!name || !name.trim()) {
+    // Validación de campos requeridos
+    if (
+      !name?.trim() ||
+      !phone?.trim() ||
+      !email?.trim() ||
+      !password?.trim()
+    ) {
       return res
         .status(400)
-        .json({ message: "El nombre completo es obligatorio." });
-    }
-    if (!phone || !phone.trim()) {
-      return res
-        .status(400)
-        .json({ message: "El número de teléfono es obligatorio." });
-    }
-    if (!email || !email.trim()) {
-      return res
-        .status(400)
-        .json({ message: "El correo electrónico es obligatorio." });
-    }
-    if (!password || !password.trim()) {
-      return res.status(400).json({ message: "La contraseña es obligatoria." });
+        .json({ message: "Todos los campos marcados son obligatorios." });
     }
 
-    // Validar placa obligatoria para vehículos con motor
     const selectedVehicle = vehicleType || "moto";
     const plateValue = vehiclePlate ? vehiclePlate.trim().toUpperCase() : "";
 
@@ -37,7 +37,6 @@ export const registerDriver = async (req, res) => {
       });
     }
 
-    // Verificar si ya existe un repartidor con ese correo
     const existingDriver = await Driver.findOne({
       email: email.toLowerCase().trim(),
     });
@@ -45,13 +44,12 @@ export const registerDriver = async (req, res) => {
       return res.status(400).json({ message: "El correo ya está registrado." });
     }
 
-    // Encriptar la contraseña
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newDriver = new Driver({
       name: name.trim(),
       phone: phone.trim(),
-      email: email.toLowerCase().trim(),
+      email: email.trim(),
       password: hashedPassword,
       vehicleType: selectedVehicle,
       vehiclePlate:
@@ -87,26 +85,31 @@ export const loginDriver = async (req, res) => {
         .json({ message: "Correo y contraseña son requeridos." });
     }
 
-    const driver = await Driver.findOne({ email: email.toLowerCase().trim() });
+    // Incluimos explícitamente la contraseña que fue excluida en el modelo
+    const driver = await Driver.findOne({
+      email: email.toLowerCase().trim(),
+    }).select("+password");
+
     if (!driver) {
       return res.status(404).json({ message: "Usuario no encontrado." });
     }
 
-    // Validar contraseña
     const isPasswordValid = await bcrypt.compare(password, driver.password);
     if (!isPasswordValid) {
       return res.status(401).json({ message: "Contraseña incorrecta." });
     }
 
-    // Verificar si está activo
     if (driver.status !== "active") {
       return res.status(403).json({
         message: "Tu cuenta aún no está activa. Contacta al administrador.",
       });
     }
 
+    const token = generateToken(driver._id);
+
     res.json({
       message: "Inicio de sesión exitoso.",
+      token,
       driver: {
         id: driver._id,
         name: driver.name,
@@ -129,10 +132,16 @@ export const toggleOnlineStatus = async (req, res) => {
     const { id } = req.params;
     const { isOnline } = req.body;
 
+    if (typeof isOnline !== "boolean") {
+      return res
+        .status(400)
+        .json({ message: "El valor de disponibilidad debe ser booleano." });
+    }
+
     const updatedDriver = await Driver.findByIdAndUpdate(
       id,
       { isOnline },
-      { new: true },
+      { new: true, runValidators: true },
     );
 
     if (!updatedDriver) {

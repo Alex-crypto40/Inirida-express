@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 function MotocarroForm({ onOrderCreated }) {
-  // 1. Añadimos estados para nombre y teléfono
+  // 1. Datos básicos del cliente
   const [nombre, setNombre] = useState("");
   const [telefono, setTelefono] = useState("");
 
@@ -11,27 +11,32 @@ function MotocarroForm({ onOrderCreated }) {
   const [oferta, setOferta] = useState(4000);
   const [comentarios, setComentarios] = useState("");
 
+  // 2. Nuevos estados para detalles de la carrera (pasajeros, equipaje, mascotas)
+  const [passengersCount, setPassengersCount] = useState(1);
+  const [hasLuggage, setHasLuggage] = useState(false);
+  const [hasPets, setHasPets] = useState(false);
+
   // Matriz de zonas y tarifas sugeridas
   const zonasTarifas = {
     urbana: {
       nombre: "Centro / Zonas Urbanas",
       base: 4000,
       min: 4000,
-      max: 5000,
+      max: 6000,
     },
-    coco: { nombre: "Centro ↔ Coco Viejo", base: 7000, min: 5000, max: 10000 },
+    coco: { nombre: "Centro ↔ Coco Viejo", base: 6000, min: 5000, max: 10000 },
     aeropuerto: {
       nombre: "Coco / Centro ↔ Aeropuerto",
-      base: 13000,
-      min: 10000,
-      max: 16000,
+      base: 15000,
+      min: 12000,
+      max: 20000,
     },
   };
 
   const handleZonaChange = (e) => {
     const nuevaZona = e.target.value;
     setZona(nuevaZona);
-    setOferta(zonasTarifas[nuevaZona].base); // Asigna el valor base automáticamente
+    setOferta(zonasTarifas[nuevaZona].base);
   };
 
   const solicitarCarrera = async (e) => {
@@ -43,18 +48,24 @@ function MotocarroForm({ onOrderCreated }) {
       return;
     }
 
-    // Estructuramos el objeto adaptado al esquema de la colección `orders`
+    // Estructuramos el objeto adaptado al backend
     const pedidoMotocarro = {
-      isMandado: true,
-
-      // Enviamos null porque ya ajustaste el backend para que no sea obligatorio
+      serviceType: "ride", // 👈 Identificador para carreras de motocarro
+      isMandado: false,
       store: null,
+
+      // Objeto de detalles del viaje para la tarjeta del conductor
+      rideDetails: {
+        passengersCount: Number(passengersCount),
+        hasLuggage: Boolean(hasLuggage),
+        hasPets: Boolean(hasPets),
+      },
 
       customer: {
         name: nombre.trim() || "Cliente Motocarro",
         phone: telefono.trim(),
         address: origen,
-        notes: `Destino: ${destino}. Notas: ${comentarios || "Sin notas"}`,
+        notes: `Destino: ${destino}.`,
       },
 
       items: [
@@ -68,12 +79,11 @@ function MotocarroForm({ onOrderCreated }) {
       subtotal: Number(oferta),
       deliveryFee: 0,
       total: Number(oferta),
-      status: "pending",
+      status: "pending_driver",
       notes: comentarios || "",
     };
 
     try {
-      // 1. Enviamos la petición POST al backend
       const API_BASE =
         import.meta.env.VITE_API_URL || "http://localhost:5000/api";
       const res = await fetch(`${API_BASE}/orders`, {
@@ -92,17 +102,19 @@ function MotocarroForm({ onOrderCreated }) {
           `🛺 ¡Carrera solicitada con éxito! Buscando motocarro por $${oferta.toLocaleString()} COP...`,
         );
 
-        // Notificamos al componente Padre (Home) para mostrar la tarjeta flotante
         if (onOrderCreated) {
           onOrderCreated(data);
         }
 
-        // Limpiar campos
+        // Limpiar formulario
         setNombre("");
         setTelefono("");
         setOrigen("");
         setDestino("");
         setComentarios("");
+        setPassengersCount(1);
+        setHasLuggage(false);
+        setHasPets(false);
       } else {
         alert("Hubo un error al crear la solicitud en el servidor.");
       }
@@ -127,7 +139,7 @@ function MotocarroForm({ onOrderCreated }) {
       </div>
 
       <form onSubmit={solicitarCarrera} className="space-y-3">
-        {/* Nombre y Teléfono (Nuevos campos) */}
+        {/* Nombre y Teléfono */}
         <div className="grid grid-cols-2 gap-2">
           <div>
             <label className="block text-xs font-bold text-gray-600 mb-1">
@@ -185,6 +197,69 @@ function MotocarroForm({ onOrderCreated }) {
           />
         </div>
 
+        {/* Seleccionables de Pasajeros, Maletas y Mascotas */}
+        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 space-y-3">
+          <label className="block text-xs font-bold text-gray-700">
+            👥 Opciones del Viaje
+          </label>
+
+          {/* Cantidad de Pasajeros */}
+          <div className="flex justify-between items-center text-xs">
+            <span className="text-gray-600 font-medium">Pasajeros:</span>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => setPassengersCount(num)}
+                  className={`px-3 py-1 rounded-lg font-bold transition-all ${
+                    passengersCount === num
+                      ? "bg-orange-500 text-white shadow-sm"
+                      : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
+                  }`}
+                >
+                  {num}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Checkbox de Maletas y Mascotas */}
+          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-200/60">
+            <label
+              className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                hasLuggage
+                  ? "bg-orange-100 border-orange-400 text-orange-900"
+                  : "bg-white border-gray-200 text-gray-500"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={hasLuggage}
+                onChange={(e) => setHasLuggage(e.target.checked)}
+                className="hidden"
+              />
+              🧳 {hasLuggage ? "Con Carga/Maleta" : "Sin Carga"}
+            </label>
+
+            <label
+              className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
+                hasPets
+                  ? "bg-orange-100 border-orange-400 text-orange-900"
+                  : "bg-white border-gray-200 text-gray-500"
+              }`}
+            >
+              <input
+                type="checkbox"
+                checked={hasPets}
+                onChange={(e) => setHasPets(e.target.checked)}
+                className="hidden"
+              />
+              🐱 {hasPets ? "Con Mascota" : "Sin Mascota"}
+            </label>
+          </div>
+        </div>
+
         {/* Selección de Trayecto / Zona */}
         <div>
           <label className="block text-xs font-bold text-gray-600 mb-1">
@@ -237,7 +312,7 @@ function MotocarroForm({ onOrderCreated }) {
           </label>
           <input
             type="text"
-            placeholder="Ej: Llevo dos maletas / Somos 3 personas"
+            placeholder="Ej: Frente al árbol grande / Llamar al llegar"
             value={comentarios}
             onChange={(e) => setComentarios(e.target.value)}
             className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"

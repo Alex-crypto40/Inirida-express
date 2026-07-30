@@ -20,6 +20,7 @@ const messageSchema = new mongoose.Schema(
     senderName: {
       type: String,
       required: true,
+      trim: true,
     },
 
     // Contenido del mensaje 💬
@@ -33,6 +34,13 @@ const messageSchema = new mongoose.Schema(
     timestamps: true, // Registra fecha y hora exacta del envío
   },
 );
+
+/* ==========================================================================
+   🚀 ÍNDICE DE RENDIMIENTO PARA EL CHAT
+   ========================================================================== */
+
+// Permite cargar e imprevistar el historial de mensajes de un pedido en tiempo récord
+messageSchema.index({ orderId: 1, createdAt: 1 });
 
 const Message = mongoose.model("Message", messageSchema);
 

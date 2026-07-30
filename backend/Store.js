@@ -2,10 +2,10 @@ import mongoose from "mongoose";
 
 const storeSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
-    image: { type: String }, // URL de la foto de portada del negocio o logo
+    name: { type: String, required: true, trim: true },
+    image: { type: String, default: "" }, // URL de foto de portada/logo
 
-    // 1. CREDENCIALES DE ACCESO Y SEGURIDAD (Nuevos campos para autenticación)
+    // 1. CREDENCIALES Y ACCESO
     email: {
       type: String,
       required: true,
@@ -19,15 +19,14 @@ const storeSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["pending", "active", "suspended"], // Controla el acceso del aliado
-      default: "pending", // Por defecto, requiere tu aprobación manual
+      enum: ["pending", "active", "suspended"],
+      default: "pending",
     },
 
-    // 2. EL CAMPO CLAVE: Controla qué tipo de negocio es
+    // 2. CATEGORÍA DEL COMERCIO
     category: {
       type: String,
       required: true,
-      // Ajustado a minúsculas para mantener consistencia con tu enum original
       enum: [
         "restaurante",
         "licorera",
@@ -40,18 +39,29 @@ const storeSchema = new mongoose.Schema(
       default: "restaurante",
     },
 
-    // 3. CAMPOS PARA HOTELES Y CONTACTO
-    whatsappNumber: { type: String }, // Número con código de país (ej: "57310XXXXXXX")
-    priceRange: { type: String }, // Ej: "$50.000 - $120.000 COP"
-    services: [{ type: String }], // Ej: ["Wi-Fi", "Aire Acondicionado", "TV"]
+    // 3. DATOS DE CONTACTO Y SERVICIOS
+    phone: { type: String, trim: true, default: "" },
+    whatsappNumber: { type: String, trim: true, default: "" }, // Ej: "57310XXXXXXX"
+    priceRange: { type: String, default: "" }, // Ej: "$50.000 - $120.000 COP"
+    services: [{ type: String }], // Ej: ["Wi-Fi", "Aire Acondicionado"]
 
-    // 4. CAMPOS GENERALES
-    deliveryTime: { type: String, default: "20-40 min" }, // Tiempo estimado
-    isOpen: { type: Boolean, default: true }, //🟢 Abierto o 🔴 Cerrado
-    rating: { type: Number, default: 4.5 },
+    // 4. ESTADO DE OPERACIÓN
+    deliveryTime: { type: String, default: "20-40 min" },
+    isOpen: { type: Boolean, default: true },
+    rating: { type: Number, default: 4.5, min: 1, max: 5 },
   },
   { timestamps: true },
 );
+
+/* ==========================================================================
+   🚀 ÍNDICES DE RENDIMIENTO EN PRODUCCIÓN
+   ========================================================================== */
+
+// 1. Permite filtrar tiendas activas por categoría ultrarrápidamente
+storeSchema.index({ status: 1, category: 1 });
+
+// 2. Búsqueda rápida por email en login
+storeSchema.index({ email: 1 });
 
 const Store = mongoose.models.Store || mongoose.model("Store", storeSchema);
 

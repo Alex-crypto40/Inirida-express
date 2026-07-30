@@ -2,86 +2,116 @@ import mongoose from "mongoose";
 
 const orderSchema = new mongoose.Schema(
   {
-    // 1. Relación con el Comercio
+    // 1. Tipo de Servicio
+    serviceType: {
+      type: String,
+      enum: ["delivery", "mandado", "ride"], // Pedido de tienda, Mandado especial o Carrera de pasajeros
+      default: "delivery",
+      required: true,
+    },
+
+    // 2. Relación con el Comercio (Opcional)
     store: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
-      required: false,
+      default: null,
     },
 
-    // PIN de confirmación para la entrega 🔐
-    deliveryPin: {
-      type: String,
-      required: true,
-      default: () => Math.floor(1000 + Math.random() * 9000).toString(),
-    },
-
-    // 2. Relación con el Repartidor que "toma" la carrera (al inicio es null)
+    // 3. Relación con el Repartidor / Conductor
     driver: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Driver",
       default: null,
     },
 
-    // 3. Datos del Cliente (Sin necesidad de que esté registrado en la app)
+    // 4. Datos del Cliente
     customer: {
       name: { type: String, required: true, trim: true },
       phone: { type: String, required: true, trim: true },
-      address: { type: String, required: true, trim: true },
-      notes: { type: String, default: "" }, // Ej: "Pagaré con billete de $50.000"
+      address: { type: String, required: true, trim: true }, // Punto de entrega o destino final
+      pickupAddress: { type: String, default: "", trim: true }, // Punto de origen (crucial para carreras/mandados)
+      notes: { type: String, default: "", trim: true }, // Observaciones generales
     },
 
-    // 4. Ítems o Productos del pedido
+    // 5. Módulo Especial para Carreras de Pasajeros (RideDetails) 🛵🚘
+    rideDetails: {
+      passengersCount: {
+        type: Number,
+        default: 1,
+        min: 1,
+      },
+      hasLuggage: {
+        type: Boolean,
+        default: false,
+      },
+      luggageDetails: {
+        type: String,
+        default: "", // Ej: "2 maletas medianas"
+        trim: true,
+      },
+      hasPets: {
+        type: Boolean,
+        default: false,
+      },
+      petDetails: {
+        type: String,
+        default: "", // Ej: "2 gatos en guacal"
+        trim: true,
+      },
+    },
+
+    // 6. Ítems o Productos del pedido (Para tiendas)
     items: [
       {
         product: {
           type: mongoose.Schema.Types.ObjectId,
           ref: "Product",
         },
-        name: { type: String, required: true },
-        price: { type: Number, required: true },
-        quantity: { type: Number, required: true, default: 1 },
+        name: { type: String, required: true, trim: true },
+        price: { type: Number, required: true, min: 0 },
+        quantity: { type: Number, required: true, min: 1, default: 1 },
       },
     ],
 
-    // 5. Para el módulo de "Mandados" (si aplica)
+    // 7. Módulo de Mandados
     isMandado: {
       type: Boolean,
       default: false,
     },
     mandadoDetail: {
       type: String,
-      default: "", // Descripción abierta del mandado
+      default: "",
+      trim: true,
     },
 
-    // 6. Valores Monetarios
-    subtotal: { type: Number, required: true, default: 0 },
-    deliveryFee: { type: Number, required: true, default: 4000 }, // Domicilio estándar en Inírida
-    total: { type: Number, required: true, default: 0 },
+    // 8. Valores Monetarios
+    subtotal: { type: Number, required: true, min: 0, default: 0 },
+    deliveryFee: { type: Number, required: true, min: 0, default: 4000 },
+    total: { type: Number, required: true, min: 0, default: 0 },
 
-    // 7. Flujo de Estados en Tiempo Real
+    // 9. Flujo de Estados en Tiempo Real
     status: {
       type: String,
       enum: [
-        "created", // Pedido recibido
-        "pending_driver", // Disponible para que CUALQUIER repartidor activo lo tome 🛵
-        "assigned", // Un repartidor presionó "Tomar Pedido"
-        "at_store", // Repartidor llegó a recoger el producto/mandado
-        "on_the_way", // Repartidor va en camino a la dirección
-        "completed", // Pedido entregado y cobrado con éxito 🏁
-        "cancelled", // Pedido cancelado
+        "created",
+        "pending_driver",
+        "assigned",
+        "at_store",
+        "on_the_way",
+        "completed",
+        "cancelled",
       ],
       default: "pending_driver",
     },
 
-    // 🔐 PIN de confirmación de entrega
+    // 🔐 PIN de confirmación de entrega (4 dígitos)
     deliveryPin: {
       type: String,
       required: true,
       default: () => Math.floor(1000 + Math.random() * 9000).toString(),
     },
 
-    // 8. Calificación del Servicio (Estrellas de 1 a 5)
+    // 10. Calificación del Servicio
     rating: {
       type: Number,
       min: 1,
@@ -91,12 +121,22 @@ const orderSchema = new mongoose.Schema(
     ratingComment: {
       type: String,
       default: "",
+      trim: true,
     },
   },
   {
-    timestamps: true, // Registra fecha y hora exacta del pedido
+    timestamps: true,
   },
 );
+
+/* ==========================================================================
+   🚀 ÍNDICES PARA PRODUCCIÓN
+   ========================================================================== */
+
+orderSchema.index({ status: 1, createdAt: -1 });
+orderSchema.index({ driver: 1, status: 1 });
+orderSchema.index({ store: 1, createdAt: -1 });
+orderSchema.index({ serviceType: 1, status: 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 

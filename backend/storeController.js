@@ -1,19 +1,21 @@
 import Store from "./Store.js";
-import bcrypt from "bcrypt"; // 👈 Importante para encriptar y comparar contraseñas
+import bcrypt from "bcrypt";
 
-// 1. OBTENER TIENDAS (Filtra por categoría y SOLO muestra las que están activas)
+// 1. OBTENER TIENDAS (Filtra por categoría y SOLO muestra las activas)
 export const getStores = async (req, res) => {
   try {
-    const { category } = req.query; // Captura el parámetro ?category= de la URL
+    const { category } = req.query;
 
-    // 👈 Solo devolvemos tiendas activas al público general
     let filter = { status: "active" };
 
     if (category) {
-      filter.category = category; // Si viene una categoría, filtramos por ella
+      filter.category = category.toLowerCase().trim();
     }
 
-    const stores = await Store.find(filter);
+    // Excluimos la contraseña en las consultas públicas
+    const stores = await Store.find(filter)
+      .select("-password")
+      .sort({ createdAt: -1 });
     res.json(stores);
   } catch (error) {
     console.error("Error al obtener las tiendas:", error);
@@ -21,43 +23,64 @@ export const getStores = async (req, res) => {
   }
 };
 
-// 2. CREAR TIENDA (Registro Público - Queda "pending" por defecto)
+// 2. OBTENER UNA TIENDA POR ID (Para cargar su perfil/menú en el frontend)
+export const getStoreById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const store = await Store.findById(id).select("-password");
+
+    if (!store) {
+      return res.status(404).json({ message: "Comercio no encontrado." });
+    }
+
+    res.json(store);
+  } catch (error) {
+    console.error("Error al obtener la tienda por ID:", error);
+    res
+      .status(500)
+      .json({ message: "Error al consultar la información de la tienda." });
+  }
+};
+
+// 3. CREAR TIENDA (Registro Público -> Estado "pending")
 export const createStore = async (req, res) => {
   try {
-    const { name, email, password, phone, category } = req.body;
+    const { name, email, password, phone, category, image, whatsappNumber } =
+      req.body;
 
-    // Validación básica para evitar guardar documentos vacíos
     if (!name || !email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Nombre, correo y contraseña son obligatorios." });
+      return res.status(400).json({
+        message: "Nombre, correo y contraseña son obligatorios.",
+      });
     }
+
+    const cleanEmail = email.toLowerCase().trim();
 
     // Verificar si el correo ya está registrado
-    const existingStore = await Store.findOne({ email });
+    const existingStore = await Store.findOne({ email: cleanEmail });
     if (existingStore) {
-      return res
-        .status(400)
-        .json({ message: "Este correo electrónico ya está registrado." });
+      return res.status(400).json({
+        message: "Este correo electrónico ya está registrado.",
+      });
     }
 
-    // Encriptar la contraseña (seguridad 10/10)
+    // Encriptar contraseña
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Crear la nueva tienda con estado PENDIENTE
     const newStore = new Store({
-      name,
-      email,
+      name: name.trim(),
+      email: cleanEmail,
       password: hashedPassword,
-      phone,
-      category,
-      status: "pending", // 👈 Por defecto queda bloqueada hasta que la apruebes
+      phone: phone ? phone.trim() : "",
+      whatsappNumber: whatsappNumber ? whatsappNumber.trim() : "",
+      category: category ? category.toLowerCase().trim() : "restaurante",
+      image: image || "",
+      status: "pending",
     });
 
     await newStore.save();
 
-    // Devolvemos mensaje de éxito sin exponer la contraseña encriptada
     res.status(201).json({
       message:
         "¡Registro exitoso! Tu cuenta está en proceso de revisión y aprobación.",
@@ -68,26 +91,26 @@ export const createStore = async (req, res) => {
   }
 };
 
-// 3. INICIO DE SESIÓN DE LA TIENDA (Validando contraseña y estado activo)
+// 4. INICIO DE SESIÓN DE LA TIENDA
 export const loginStore = async (req, res) => {
   try {
     const { email, password } = req.body;
 
     if (!email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Correo y contraseña son requeridos." });
+      return res.status(400).json({
+        message: "Correo y contraseña son requeridos.",
+      });
     }
 
-    // Buscar la tienda por correo en la BD
-    const store = await Store.findOne({ email });
+    const cleanEmail = email.toLowerCase().trim();
+
+    const store = await Store.findOne({ email: cleanEmail });
     if (!store) {
-      return res
-        .status(404)
-        .json({ message: "El correo electrónico no está registrado." });
+      return res.status(404).json({
+        message: "El correo electrónico no está registrado.",
+      });
     }
 
-    // 👈 Filtro de Seguridad: Evitar que inicien sesión si están pendientes o suspendidos
     if (store.status !== "active") {
       return res.status(403).json({
         message:
@@ -95,13 +118,11 @@ export const loginStore = async (req, res) => {
       });
     }
 
-    // Validar si la contraseña coincide con el hash de la BD
     const isMatch = await bcrypt.compare(password, store.password);
     if (!isMatch) {
       return res.status(400).json({ message: "Contraseña incorrecta." });
     }
 
-    // Login Exitoso: Devolvemos información segura de la tienda
     res.json({
       message: "¡Sesión iniciada con éxito!",
       store: {
@@ -109,6 +130,8 @@ export const loginStore = async (req, res) => {
         name: store.name,
         email: store.email,
         category: store.category,
+        image: store.image,
+        isOpen: store.isOpen,
       },
     });
   } catch (error) {

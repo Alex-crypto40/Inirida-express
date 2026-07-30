@@ -22,6 +22,7 @@ const driverSchema = new mongoose.Schema(
     password: {
       type: String,
       required: [true, "La contraseña es obligatoria"],
+      select: false, // Evita devolver el hash de la contraseña en las consultas por defecto
     },
     vehicleType: {
       type: String,
@@ -35,9 +36,8 @@ const driverSchema = new mongoose.Schema(
       uppercase: true,
       validate: {
         validator: function (value) {
-          // Si el vehículo no es bicicleta, la placa no puede estar vacía
           if (this.vehicleType !== "bicicleta") {
-            return value && value.trim().length > 0;
+            return Boolean(value && value.trim().length > 0);
           }
           return true;
         },

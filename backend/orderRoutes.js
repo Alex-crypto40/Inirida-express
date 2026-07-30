@@ -11,25 +11,33 @@ import {
 
 const router = express.Router();
 
-// 1. Crear un pedido (Cliente confirma carrito)
+/* ==========================================================================
+   1. Rutas Estáticas y Específicas (Deben ir primero)
+   ========================================================================== */
+
+// Crear un nuevo pedido (Desde el cliente al confirmar carrito)
 router.post("/", createOrder);
 
-// 2. Obtener pedidos disponibles para domiciliarios (status === 'pending_driver')
+// Obtener pedidos disponibles para repartidores (status === 'pending_driver')
 router.get("/available", getAvailableOrders);
 
-// 3. sala de mensaje por pedido
+// Obtener la carrera activa que un repartidor tiene en curso
+router.get("/driver/:driverId/active", getActiveDriverOrder);
+
+/* ==========================================================================
+   2. Rutas Parametrizadas por Pedido (/:orderId/...)
+   ========================================================================== */
+
+// Obtener el historial de mensajes de un pedido específico
 router.get("/:orderId/messages", getOrderMessages);
 
-// 3. Tomar una carrera (Primer domiciliario que da clic)
+// Tomar una carrera (Asignación atómica al primer domiciliario que la acepte)
 router.post("/:orderId/take", takeOrder);
 
-// 4. Actualizar estado del pedido (at_store, on_the_way, completed)
+// Actualizar estado del pedido (at_store, on_the_way, completed, cancelled)
 router.patch("/:orderId/status", updateOrderStatus);
 
-// 5. Calificar la entrega (1 a 5 estrellas)
-router.post("/:orderId/rate", rateOrder);
-
-// 6. Obtener la carrera activa que el repartidor tiene en curso
-router.get("/driver/:driverId/active", getActiveDriverOrder);
+// Calificar la entrega (1 a 5 estrellas + comentario)
+router.patch("/:orderId/rate", rateOrder);
 
 export default router;

@@ -1,6 +1,10 @@
 // --- CONFIGURACIÓN E INICIALIZACIÓN DE ESTADO ---
-const API_URL = "http://localhost:5000/api/products";
-let productos = []; // Se llenará dinámicamente desde MongoDB Atlas
+const API_URL =
+  window.location.hostname === "localhost"
+    ? "http://localhost:5000/api/products"
+    : "/api/products";
+
+let productos = [];
 let carrito = JSON.parse(localStorage.getItem("carrito_inirida")) || [];
 
 // --- ELEMENTOS DEL DOM ---
@@ -15,10 +19,8 @@ async function cargarProductosDesdeBD() {
     const respuesta = await fetch(API_URL);
     if (!respuesta.ok) throw new Error("Error al conectar con el servidor");
 
-    // Guardamos los datos de la nube en nuestro arreglo local
     productos = await respuesta.json();
 
-    // Pintamos los productos frescos de la base de datos en la pantalla
     renderizarProductos(productos);
     actualizarInterfazCarrito();
   } catch (error) {
@@ -27,7 +29,7 @@ async function cargarProductosDesdeBD() {
       contenedorProductos.innerHTML = `
         <div class="col-span-full text-center py-10">
           <p class="text-red-500 font-semibold text-lg">No se pudo cargar el menú en este momento.</p>
-          <p class="text-gray-500 text-sm">Asegúrate de que tu servidor Express esté corriendo en el puerto 5000.</p>
+          <p class="text-gray-500 text-sm">Verifica tu conexión a internet o el estado de los servidores.</p>
         </div>
       `;
     }
@@ -38,19 +40,21 @@ async function cargarProductosDesdeBD() {
 function renderizarProductos(listaProductos) {
   if (!contenedorProductos) return;
 
-  if (listaProductos.length === 0) {
+  if (!Array.isArray(listaProductos) || listaProductos.length === 0) {
     contenedorProductos.innerHTML = `<p class="text-center col-span-full text-gray-500">No hay productos disponibles en el menú.</p>`;
     return;
   }
 
   contenedorProductos.innerHTML = listaProductos
     .map((producto) => {
-      // MongoDB genera el campo "_id" en lugar de "id"
       const idProducto = producto._id;
+      const precioFormateado = Number(producto.price || 0).toLocaleString(
+        "es-CO",
+      );
 
       return `
       <div class="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-lg transition-shadow duration-300 border border-gray-100 flex flex-col">
-        <div class="h-48 bg-gray-200 flex items-center justify-center text-gray-400 font-medium">
+        <div class="h-48 bg-gray-200 flex items-center justify-center text-gray-400 font-medium relative">
           <span class="text-xs uppercase bg-orange-100 text-orange-600 px-3 py-1 rounded-full font-semibold absolute top-3 left-3">
             ${producto.category || "General"}
           </span>
@@ -64,7 +68,7 @@ function renderizarProductos(listaProductos) {
             <p class="text-gray-500 text-sm mb-4 line-clamp-2">${producto.description || "Sin descripción disponible."}</p>
           </div>
           <div class="flex items-center justify-between mt-auto">
-            <span class="text-xl font-black text-orange-600">$${producto.price.toLocaleString("es-CO")}</span>
+            <span class="text-xl font-black text-orange-600">$${precioFormateado}</span>
             <button 
               onclick="agregarAlCarrito('${idProducto}')"
               class="bg-orange-500 hover:bg-orange-600 text-white font-bold py-2 px-4 rounded-xl transition-colors duration-200 flex items-center gap-2 shadow-sm"
@@ -82,9 +86,8 @@ function renderizarProductos(listaProductos) {
     .join("");
 }
 
-// --- 3. GESTIÓN DEL CARRITO (CONECTADO A LOS IDs DE MONGO) ---
+// --- 3. GESTIÓN DEL CARRITO ---
 window.agregarAlCarrito = function (id) {
-  // Buscamos el producto por su campo _id único de MongoDB
   const productoSeleccionado = productos.find((p) => p._id === id);
   if (!productoSeleccionado) return;
 
@@ -103,10 +106,8 @@ window.agregarAlCarrito = function (id) {
 };
 
 function actualizarInterfazCarrito() {
-  // Guardamos en LocalStorage para no perder la selección al recargar
   localStorage.setItem("carrito_inirida", JSON.stringify(carrito));
 
-  // Actualizamos el contador visual del carrito
   if (contadorCarrito) {
     const totalItems = carrito.reduce((acc, item) => acc + item.cantidad, 0);
     contadorCarrito.textContent = totalItems;
@@ -114,5 +115,4 @@ function actualizarInterfazCarrito() {
 }
 
 // --- 4. DISPARO INICIAL ---
-// Escuchamos cuando el HTML esté cargado por completo para jalar los datos desde Atlas
 document.addEventListener("DOMContentLoaded", cargarProductosDesdeBD);

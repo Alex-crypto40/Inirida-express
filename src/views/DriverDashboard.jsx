@@ -192,22 +192,43 @@ export default function DriverDashboard() {
         </div>
       )}
 
-      {/* VISTA DE CARRERA ACTIVA (SIMPLIFICADA) */}
+      {/* VISTA DE CARRERA ACTIVA */}
       {activeOrder ? (
         <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-orange-500 mb-6">
           <div className="flex justify-between items-center mb-3">
             <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full uppercase">
-              Carrera en Curso
+              {activeOrder.serviceType === "ride"
+                ? "🛺 Carrera Activa"
+                : "📦 Pedido en Curso"}
             </span>
             <span className="font-extrabold text-orange-600 text-lg">
               ${activeOrder.total?.toLocaleString()}
             </span>
           </div>
 
+          {/* Badges de Detalles de Carrera (Pasajeros, Carga, Mascotas) */}
+          {activeOrder.serviceType === "ride" && activeOrder.rideDetails && (
+            <div className="flex flex-wrap gap-2 mb-4 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
+              <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+                👥 {activeOrder.rideDetails.passengersCount || 1} Pasajero(s)
+              </span>
+              {activeOrder.rideDetails.hasLuggage && (
+                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+                  🧳 Con Carga/Maleta
+                </span>
+              )}
+              {activeOrder.rideDetails.hasPets && (
+                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+                  🐱 Con Mascota
+                </span>
+              )}
+            </div>
+          )}
+
           {/* 💬 Botón de Chat Directo */}
           <button
             onClick={() => setActiveChatOrder(activeOrder)}
-            className="w-full mb-4 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm"
+            className="w-full mb-4 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
           >
             <span>💬 Abrir Chat con Cliente / Comercio</span>
             <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full">
@@ -216,30 +237,40 @@ export default function DriverDashboard() {
           </button>
 
           <div className="space-y-3 mb-5 text-sm text-gray-700">
-            {/* Información del Comercio */}
+            {/* Información de Recogida / Comercio */}
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
-                Comercio / Recogida
+                {activeOrder.serviceType === "ride"
+                  ? "📍 Punto de Recogida"
+                  : "🏪 Comercio / Tienda"}
               </p>
               <p className="font-bold text-gray-800">
-                {activeOrder.store?.name || "Comercio Aliado"}
+                {activeOrder.serviceType === "ride"
+                  ? activeOrder.customer?.address
+                  : activeOrder.store?.name || "Comercio Aliado"}
               </p>
-              <p className="text-xs text-gray-500">
-                📍 {activeOrder.store?.address || "Dirección del comercio"}
-              </p>
+              {activeOrder.serviceType !== "ride" && (
+                <p className="text-xs text-gray-500">
+                  📍 {activeOrder.store?.address || "Dirección del comercio"}
+                </p>
+              )}
             </div>
 
-            {/* Información del Cliente */}
+            {/* Información del Cliente / Destino */}
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
-                Cliente / Entrega
+                {activeOrder.serviceType === "ride"
+                  ? "🏁 Pasajero / Destino"
+                  : "👤 Cliente / Entrega"}
               </p>
               <p className="font-bold text-gray-800">
-                {activeOrder.customer?.name}
+                {activeOrder.customer?.name || "Cliente Inírida Express"}
               </p>
-              <p className="text-xs text-gray-600">
-                📍 {activeOrder.customer?.address}
-              </p>
+              {activeOrder.serviceType !== "ride" && (
+                <p className="text-xs text-gray-600">
+                  📍 {activeOrder.customer?.address}
+                </p>
+              )}
               <p className="text-xs text-gray-600">
                 📞 {activeOrder.customer?.phone}
               </p>
@@ -262,13 +293,13 @@ export default function DriverDashboard() {
               placeholder="Ej: 4321"
               value={inputPin}
               onChange={(e) => setInputPin(e.target.value)}
-              className="w-full text-center tracking-widest text-xl font-extrabold border border-gray-300 rounded-xl py-2 focus:ring-2 focus:ring-green-500 focus:outline-none"
+              className="w-full text-center tracking-widest text-xl font-extrabold border border-gray-300 rounded-xl py-2 focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
             />
             <button
               onClick={handleCompleteOrder}
-              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-colors"
+              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
             >
-              💵 Verificar PIN y Entregar
+              💵 Verificar PIN y Completar Carrera
             </button>
           </div>
         </div>
@@ -276,7 +307,7 @@ export default function DriverDashboard() {
         /* VISTA DE CARRERAS DISPONIBLES */
         <div>
           <h3 className="font-bold text-gray-800 mb-3 flex justify-between items-center text-sm">
-            <span>Carreras Disponibles</span>
+            <span>Solicitudes Disponibles</span>
             <span className="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full">
               {availableOrders.length}
             </span>
@@ -286,7 +317,7 @@ export default function DriverDashboard() {
             <div className="bg-white rounded-2xl p-8 text-center text-gray-400 border border-gray-100">
               <p className="text-4xl mb-2">🛵</p>
               <p className="text-sm font-semibold">
-                Ponte "En línea" para ver pedidos disponibles.
+                Ponte "En línea" para ver carreras y pedidos disponibles.
               </p>
             </div>
           ) : availableOrders.length === 0 ? (
@@ -298,42 +329,77 @@ export default function DriverDashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {availableOrders.map((order) => (
-                <div
-                  key={order._id}
-                  className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between"
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <h4 className="font-bold text-gray-800 text-sm">
-                        {order.store?.name || "Pedido de Comercio"}
-                      </h4>
-                      <p className="text-xs text-gray-500">
-                        📍 Entregar en: {order.customer?.address}
-                      </p>
+              {availableOrders.map((order) => {
+                const isRide = order.serviceType === "ride" || order.isMandado;
+                return (
+                  <div
+                    key={order._id}
+                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <span
+                          className={`inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase mb-1 ${
+                            isRide
+                              ? "bg-orange-100 text-orange-700"
+                              : "bg-blue-100 text-blue-700"
+                          }`}
+                        >
+                          {isRide ? "🛺 Motocarro" : "🛍️ Tienda"}
+                        </span>
+                        <h4 className="font-bold text-gray-800 text-sm">
+                          {isRide
+                            ? `Origen: ${order.customer?.address || "Zona Urbana"}`
+                            : order.store?.name || "Pedido de Comercio"}
+                        </h4>
+                        <p className="text-xs text-gray-500">
+                          {isRide
+                            ? `${order.customer?.notes || ""}`
+                            : `📍 Entregar en: ${order.customer?.address}`}
+                        </p>
+                      </div>
+                      <span className="font-extrabold text-green-600 text-sm">
+                        ${order.total?.toLocaleString()}
+                      </span>
                     </div>
-                    <span className="font-extrabold text-green-600 text-sm">
-                      ${order.total?.toLocaleString()}
-                    </span>
-                  </div>
 
-                  <div className="flex justify-between items-center mt-3 pt-2 border-t border-gray-50">
-                    <span className="text-xs text-gray-400">
-                      Gana tarifa de domicilio:{" "}
-                      <strong className="text-gray-700">
-                        ${order.deliveryFee}
-                      </strong>
-                    </span>
-                    <button
-                      onClick={() => handleTakeOrder(order._id)}
-                      disabled={loading}
-                      className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-transform"
-                    >
-                      {loading ? "Tomando..." : "Tomar Pedido 🛵"}
-                    </button>
+                    {/* Mostrar Badges visuales en la tarjeta disponible */}
+                    {order.rideDetails && (
+                      <div className="flex flex-wrap gap-1.5 my-2">
+                        <span className="bg-gray-100 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                          👥 {order.rideDetails.passengersCount || 1} Pza
+                        </span>
+                        {order.rideDetails.hasLuggage && (
+                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                            🧳 Maleta/Carga
+                          </span>
+                        )}
+                        {order.rideDetails.hasPets && (
+                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
+                            🐱 Mascota
+                          </span>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50">
+                      <span className="text-xs text-gray-400">
+                        Tarifa total:{" "}
+                        <strong className="text-gray-700">
+                          ${order.total?.toLocaleString()} COP
+                        </strong>
+                      </span>
+                      <button
+                        onClick={() => handleTakeOrder(order._id)}
+                        disabled={loading}
+                        className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-transform cursor-pointer"
+                      >
+                        {loading ? "Tomando..." : "Tomar Carrera 🛵"}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

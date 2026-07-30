@@ -1,9 +1,20 @@
 import mongoose from "mongoose";
 
-const mongoURI =
-  process.env.MONGO_URI || "mongodb://localhost:27016/inirida-express"; // Usa tu variable o string real
+const mongoURI = process.env.MONGO_URI;
 
-mongoose
-  .connect(mongoURI)
-  .then(() => console.log("🍃 Conexión exitosa a MongoDB Atlas"))
-  .catch((err) => console.error("❌ Error conectando a MongoDB:", err));
+if (!mongoURI) {
+  console.error("❌ ERROR CRÍTICO: La variable MONGO_URI no está definida.");
+  process.exit(1);
+}
+
+const connectDB = async () => {
+  try {
+    await mongoose.connect(mongoURI);
+    console.log("🍃 Conexión exitosa a MongoDB");
+  } catch (err) {
+    console.error("❌ Error conectando a MongoDB:", err.message);
+    process.exit(1);
+  }
+};
+
+export default connectDB;
