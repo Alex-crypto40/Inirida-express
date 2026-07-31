@@ -24,9 +24,9 @@ export default function OrderStatusWidget({
 
     const socket = io(SOCKET_URL);
 
-    // Unirse a la sala única del pedido con el nombre exacto que espera el backend
+    // Unirse a la sala única del pedido
     socket.emit("join_order", `order_${activeOrder._id}`);
-    socket.emit("join_order", activeOrder._id); // Backup por compatibilidad
+    socket.emit("join_order", activeOrder._id);
 
     // Escuchar cuando el conductor acepta la carrera o cambia el estado
     const handleOrderUpdate = (updatedOrder) => {
@@ -57,7 +57,7 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
-  // Normalizar datos del conductor (por si viene driverId, driver o assignedDriver)
+  // Normalizar datos del conductor
   const driver =
     activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
   const status = activeOrder.status;
@@ -78,12 +78,12 @@ export default function OrderStatusWidget({
 
   return (
     <>
-      {/* Tarjeta Flotante del Cliente */}
+      {/* Tarjeta Flotante del Cliente con zIndex de tarjeta (1040) */}
       <div
-        className="position-fixed bottom-0 end-0 m-3 p-3 bg-white shadow-lg rounded-2xl border border-orange-200"
+        className="position-fixed bottom-0 start-50 translate-middle-x mb-3 p-3 bg-white shadow-lg rounded-2xl border border-orange-200"
         style={{
-          zIndex: 1050,
-          maxWidth: "360px",
+          zIndex: 1040,
+          maxWidth: "380px",
           width: "92%",
           boxShadow: "0 10px 25px -5px rgba(249, 115, 22, 0.25)",
         }}
@@ -128,10 +128,10 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* ESTADO 2: CONDUCTOR EN CAMINO (ACEPTADO/ASIGNADO) */}
+        {/* ESTADO 2: CONDUCTOR EN CAMINO */}
         {isAccepted && (
           <div className="space-y-2 mt-2">
-            {/* PIN DE SEGURIDAD VISIBLE PARA EL CLIENTE */}
+            {/* PIN DE SEGURIDAD */}
             {pinCode && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-2 text-center">
                 <span className="text-[10px] text-orange-800 font-bold uppercase tracking-wider block">
@@ -151,12 +151,12 @@ export default function OrderStatusWidget({
               <div className="d-flex justify-content-between">
                 <span className="text-gray-500 font-medium">Conductor:</span>
                 <strong className="text-gray-800">
-                  {driver?.name || "Asignado"}
+                  {driver?.name || driver?.fullName || "Asignado"}
                 </strong>
               </div>
               <div className="d-flex justify-content-between">
                 <span className="text-gray-500 font-medium">Vehículo:</span>
-                <span className="font-bold text-gray-700">
+                <span className="font-bold text-gray-700 capitalize">
                   {driver?.vehicleType || "Motocarro"}
                 </span>
               </div>
@@ -168,23 +168,14 @@ export default function OrderStatusWidget({
               </div>
             </div>
 
-            {/* Botones de Contacto Rápido */}
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              {driver?.phone && (
-                <a
-                  href={`https://wa.me/57${driver.phone}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn btn-success btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-1"
-                >
-                  <i className="bi bi-whatsapp"></i> WhatsApp
-                </a>
-              )}
+            {/* BOTÓN ÚNICO DE CHAT NATURA */}
+            <div className="pt-1">
               <button
-                className="btn btn-primary btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-1 w-100"
+                className="btn btn-warning text-white btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-2 w-100 py-2 shadow-sm"
+                style={{ backgroundColor: "#f97316", borderColor: "#ea580c" }}
                 onClick={() => setShowChat(true)}
               >
-                <i className="bi bi-chat-dots-fill"></i> Chat App
+                <i className="bi bi-chat-dots-fill"></i> Abrir Chat App
               </button>
             </div>
           </div>
@@ -201,7 +192,7 @@ export default function OrderStatusWidget({
         )}
       </div>
 
-      {/* Modal de Chat con el Conductor */}
+      {/* Modal del Chat sobrepuesto de forma independiente */}
       {showChat && (
         <OrderChatModal
           orderId={activeOrder._id}

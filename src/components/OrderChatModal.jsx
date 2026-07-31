@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-// URL de tu servidor backend (Ajusta la IP si estás probando desde celular en red local)
-const SOCKET_URL = "http://localhost:5000";
+// Determinar la URL base dinámica usando VITE_API_URL sin el sufijo /api
+const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const BASE_URL = RAW_API.replace(/\/api\/?$/, "");
 
 const OrderChatModal = ({
   orderId,
   currentUserRole,
+  userType, // Fallback si se pasa como userType
   currentUserName,
   onClose,
 }) => {
@@ -15,13 +17,17 @@ const OrderChatModal = ({
   const socketRef = useRef(null);
   const chatBottomRef = useRef(null);
 
+  // Normalizar el rol del usuario (prioridad currentUserRole, luego userType, por defecto "client")
+  const role = currentUserRole || userType || "client";
+  const name = currentUserName || (role === "client" ? "Cliente" : role === "driver" ? "Conductor" : "Comercio");
+
   useEffect(() => {
-    // 1. Cargar el historial de mensajes previo desde el backend
+    if (!orderId) return;
+
+    // 1. Cargar historial de mensajes previo desde el backend
     const fetchHistory = async () => {
       try {
-        const response = await fetch(
-          `http://localhost:5000/api/orders/${orderId}/messages`,
-        );
+        const response = await fetch(`${BASE_URL}/api/orders/${orderId}/messages`);
         if (response.ok) {
           const data = await response.json();
           setMessages(data);
@@ -33,52 +39,61 @@ const OrderChatModal = ({
 
     fetchHistory();
 
-    // 2. Conectar con el servidor WebSocket
-    socketRef.current = io(SOCKET_URL);
+    // 2. Conectar al servidor WebSocket
+    socketRef.current = io(BASE_URL);
 
     // Unirse a la sala única de esta orden
     socketRef.current.emit("join_order_chat", orderId);
+    socketRef.current.emit("join_order", `order_${orderId}`); // Compatibilidad cruzada
 
-    // Escuchar mensajes entrantes en tiempo real
-    socketRef.current.on("receive_message", (newMessage) => {
+    // Escuchar mensajes en tiempo real
+    const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => [...prev, newMessage]);
-    });
+    };
 
-    // Desconectar socket al cerrar el modal
+    socketRef.current.on("receive_message", handleReceiveMessage);
+    socketRef.current.on("new_message", handleReceiveMessage);
+
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
+      if (socketRef.current) {
+        socketRef.current.off("receive_message", handleReceiveMessage);
+        socketRef.current.off("new_message", handleReceiveMessage);
+        socketRef.current.disconnect();
+      }
     };
   }, [orderId]);
 
-  // Auto-scroll hacia el último mensaje
+  // Auto-scroll al último mensaje enviado o recibido
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Enviar nuevo mensaje
+  // Enviar mensaje
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!text.trim()) return;
 
     const messageData = {
       orderId,
-      senderRole: currentUserRole, // "driver" | "client" | "store"
-      senderName: currentUserName,
+      senderRole: role, // "driver" | "client" | "store"
+      senderName: name,
       text: text.trim(),
     };
 
     // Emitir mensaje por WebSockets
-    socketRef.current.emit("send_message", messageData);
+    if (socketRef.current) {
+      socketRef.current.emit("send_message", messageData);
+    }
     setText("");
   };
 
-  // Asignar colores según el rol que envía el mensaje
-  const getRoleBadge = (role) => {
-    switch (role) {
+  // Asignar colores y badges según el rol
+  const getRoleBadge = (senderRole) => {
+    switch (senderRole) {
       case "store":
         return { label: "Comercio 🏪", bg: "bg-orange-100 text-orange-800" };
       case "driver":
-        return { label: "Repartidor 🛵", bg: "bg-blue-100 text-blue-800" };
+        return { label: "Motocarro 🛺", bg: "bg-blue-100 text-blue-800" };
       case "client":
         return { label: "Cliente 👤", bg: "bg-green-100 text-green-800" };
       default:
@@ -87,7 +102,10 @@ const OrderChatModal = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div
+      className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+      style={{ zIndex: 1060 }} // Garantiza estar sobre la tarjeta flotante (z-1040/1050)
+    >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100">
         {/* Encabezado del Chat */}
         <div className="bg-orange-500 text-white p-4 flex justify-between items-center shadow-md">
@@ -101,7 +119,8 @@ const OrderChatModal = ({
           </div>
           <button
             onClick={onClose}
-            className="bg-orange-600 hover:bg-orange-700 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors"
+            type="button"
+            className="bg-orange-600 hover:bg-orange-700 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
           >
             ✕
           </button>
@@ -111,14 +130,14 @@ const OrderChatModal = ({
         <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
           {messages.length === 0 ? (
             <div className="text-center text-gray-400 text-sm mt-10">
-              <p>📍 Chat activo entre Cliente, Comercio y Domiciliario.</p>
+              <p>📍 Chat activo entre Cliente y Motocarro.</p>
               <p className="text-xs mt-1">
                 Escribe un mensaje para iniciar la conversación.
               </p>
             </div>
           ) : (
             messages.map((msg, index) => {
-              const isMe = msg.senderRole === currentUserRole;
+              const isMe = msg.senderRole === role;
               const badge = getRoleBadge(msg.senderRole);
 
               return (
@@ -167,7 +186,7 @@ const OrderChatModal = ({
           />
           <button
             type="submit"
-            className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl text-sm transition-colors flex items-center gap-1"
+            className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl text-sm transition-colors flex items-center gap-1 cursor-pointer"
           >
             Enviar 🚀
           </button>
