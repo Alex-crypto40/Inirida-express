@@ -22,7 +22,7 @@ function MotocarroForm({ onOrderCreated }) {
   const zonasTarifas = {
     urbana: { nombre: "Urbana / Centro", base: 4000 },
     coco: { nombre: "Centro ↔ Coco Viejo", base: 6000 },
-    aeropuerto: { nombre: "Trayecto Aeropuerto", base: 15000 },
+    aeropuerto: { nombre: "Trayecto Aeropuerto", base: 12000 },
   };
 
   const handleSelectZona = (nuevaZona) => {
@@ -32,7 +32,7 @@ function MotocarroForm({ onOrderCreated }) {
 
   // Ajustar oferta con botones + / -
   const handleAjustarOferta = (monto) => {
-    setOferta((prev) => Math.max(2000, prev + monto));
+    setOferta((prev) => Math.max(4000, prev + monto));
   };
 
   const solicitarCarrera = async (e) => {
@@ -117,9 +117,7 @@ function MotocarroForm({ onOrderCreated }) {
             <h3 className="font-extrabold text-sm text-gray-800">
               Pedir Carrera
             </h3>
-            <p className="text-[11px] text-gray-400">
-              Solicitud rápida e inmediata
-            </p>
+            <p className="text-[11px] text-gray-400">Solicitud rápida</p>
           </div>
         </div>
       </div>
@@ -181,18 +179,16 @@ function MotocarroForm({ onOrderCreated }) {
 
           {/* Chips Rápidos de Destino */}
           <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
-            {["Comercio", "Aeropuerto", "Coco Viejo", "Hospital"].map(
-              (chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => setDestino(chip)}
-                  className="text-[10px] bg-white hover:bg-orange-50 border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg font-semibold transition-colors shrink-0 cursor-pointer"
-                >
-                  + {chip}
-                </button>
-              ),
-            )}
+            {["Centro", "Aeropuerto", "Coco Viejo", "Hospital"].map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => setDestino(chip)}
+                className="text-[10px] bg-white hover:bg-orange-50 border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg font-semibold transition-colors shrink-0 cursor-pointer"
+              >
+                + {chip}
+              </button>
+            ))}
           </div>
         </div>
 
