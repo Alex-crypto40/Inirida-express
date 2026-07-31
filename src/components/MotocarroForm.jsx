@@ -1,73 +1,64 @@
 import { useState } from "react";
 
 function MotocarroForm({ onOrderCreated }) {
-  // 1. Datos básicos del cliente
-  const [nombre, setNombre] = useState("");
+  // 1. Datos del cliente y ruta
   const [telefono, setTelefono] = useState("");
-
+  const [nombre, setNombre] = useState("");
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
-  const [zona, setZona] = useState("urbana");
-  const [oferta, setOferta] = useState(4000);
   const [comentarios, setComentarios] = useState("");
 
-  // 2. Nuevos estados para detalles de la carrera (pasajeros, equipaje, mascotas)
+  // 2. Opciones de viaje (por defecto simples)
+  const [zona, setZona] = useState("urbana");
+  const [oferta, setOferta] = useState(4000);
   const [passengersCount, setPassengersCount] = useState(1);
   const [hasLuggage, setHasLuggage] = useState(false);
   const [hasPets, setHasPets] = useState(false);
 
-  // Matriz de zonas y tarifas sugeridas
+  // Toggle para mostrar/ocultar opciones avanzadas
+  const [showExtraOptions, setShowExtraOptions] = useState(false);
+
+  // Configuración de Zonas de Inírida
   const zonasTarifas = {
-    urbana: {
-      nombre: "Centro / Zonas Urbanas",
-      base: 4000,
-      min: 4000,
-      max: 6000,
-    },
-    coco: { nombre: "Centro ↔ Coco Viejo", base: 6000, min: 5000, max: 10000 },
-    aeropuerto: {
-      nombre: "Coco / Centro ↔ Aeropuerto",
-      base: 15000,
-      min: 12000,
-      max: 20000,
-    },
+    urbana: { nombre: "Urbana / Centro", base: 4000 },
+    coco: { nombre: "Centro ↔ Coco Viejo", base: 6000 },
+    aeropuerto: { nombre: "Trayecto Aeropuerto", base: 15000 },
   };
 
-  const handleZonaChange = (e) => {
-    const nuevaZona = e.target.value;
+  const handleSelectZona = (nuevaZona) => {
     setZona(nuevaZona);
     setOferta(zonasTarifas[nuevaZona].base);
+  };
+
+  // Ajustar oferta con botones + / -
+  const handleAjustarOferta = (monto) => {
+    setOferta((prev) => Math.max(2000, prev + monto));
   };
 
   const solicitarCarrera = async (e) => {
     e.preventDefault();
     if (!origen.trim() || !destino.trim() || !telefono.trim()) {
       alert(
-        "Por favor completa los campos obligatorios (Teléfono, Origen y Destino).",
+        "Por favor completa los campos obligatorios (Celular, Origen y Destino).",
       );
       return;
     }
 
-    // Estructuramos el objeto adaptado al backend
     const pedidoMotocarro = {
-      serviceType: "ride", // 👈 Identificador para carreras de motocarro
+      serviceType: "ride",
       isMandado: false,
       store: null,
-
-      // Objeto de detalles del viaje para la tarjeta del conductor
       rideDetails: {
         passengersCount: Number(passengersCount),
         hasLuggage: Boolean(hasLuggage),
         hasPets: Boolean(hasPets),
       },
-
       customer: {
         name: nombre.trim() || "Cliente Motocarro",
         phone: telefono.trim(),
         address: origen,
         notes: `Destino: ${destino}.`,
       },
-
       items: [
         {
           name: `Carrera Motocarro (${zonasTarifas[zona]?.nombre || "Zona General"})`,
@@ -75,7 +66,6 @@ function MotocarroForm({ onOrderCreated }) {
           quantity: 1,
         },
       ],
-
       subtotal: Number(oferta),
       deliveryFee: 0,
       total: Number(oferta),
@@ -85,37 +75,29 @@ function MotocarroForm({ onOrderCreated }) {
 
     try {
       const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
-      const API_BASE = RAW_API.replace(/\/api\/?$/, ""); // Normaliza el endpoint
+      const API_BASE = RAW_API.replace(/\/api\/?$/, "");
 
       const res = await fetch(`${API_BASE}/api/orders`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pedidoMotocarro),
       });
 
       if (res.ok) {
         const data = await res.json();
-        console.log("Carrera guardada en BD:", data);
-
         alert(
-          `🛺 ¡Carrera solicitada con éxito! Buscando motocarro por $${oferta.toLocaleString()} COP...`,
+          `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`,
         );
 
         if (onOrderCreated) {
           onOrderCreated(data.order || data);
         }
 
-        // Limpiar formulario
-        setNombre("");
-        setTelefono("");
+        // Limpiar formulario tras éxito
         setOrigen("");
         setDestino("");
         setComentarios("");
-        setPassengersCount(1);
-        setHasLuggage(false);
-        setHasPets(false);
+        setShowExtraOptions(false);
       } else {
         alert("Hubo un error al crear la solicitud en el servidor.");
       }
@@ -126,206 +108,230 @@ function MotocarroForm({ onOrderCreated }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
-      <div className="flex items-center gap-2 border-b border-gray-100 pb-3">
-        <span className="text-2xl p-2 bg-orange-100 rounded-xl">🛺</span>
-        <div>
-          <h3 className="font-extrabold text-sm text-gray-800">
-            Pedir una Carrera
-          </h3>
-          <p className="text-[11px] text-gray-400">
-            Pide tu motocarro rápido y seguro
-          </p>
+    <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4 max-w-md mx-auto">
+      {/* Header Breve */}
+      <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+        <div className="flex items-center gap-2">
+          <span className="text-xl p-2 bg-orange-100 rounded-xl">🛺</span>
+          <div>
+            <h3 className="font-extrabold text-sm text-gray-800">
+              Pedir Carrera
+            </h3>
+            <p className="text-[11px] text-gray-400">
+              Solicitud rápida e inmediata
+            </p>
+          </div>
         </div>
       </div>
 
       <form onSubmit={solicitarCarrera} className="space-y-3">
-        {/* Nombre y Teléfono */}
+        {/* Teléfono y Nombre rápido */}
         <div className="grid grid-cols-2 gap-2">
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              👤 Tu Nombre
-            </label>
+          <input
+            type="tel"
+            placeholder="📱 Celular *"
+            value={telefono}
+            onChange={(e) => setTelefono(e.target.value)}
+            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none font-medium"
+            required
+          />
+          <input
+            type="text"
+            placeholder="👤 Nombre (opcional)"
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none font-medium"
+          />
+        </div>
+
+        {/* Tarjeta de Ruta Unificada (Estilo App de Transporte) */}
+        <div className="bg-gray-50/80 p-3 rounded-2xl border border-gray-200/80 space-y-2 relative">
+          {/* Línea conectora visual */}
+          <div className="absolute left-[22px] top-[28px] bottom-[28px] w-0.5 bg-gray-300 pointer-events-none" />
+
+          {/* Campo Origen */}
+          <div className="flex items-center gap-2 relative z-10">
+            <span className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
+              A
+            </span>
             <input
               type="text"
-              placeholder="Opcional"
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-gray-600 mb-1">
-              📱 Celular
-            </label>
-            <input
-              type="tel"
-              placeholder="Ej: 310..."
-              value={telefono}
-              onChange={(e) => setTelefono(e.target.value)}
-              className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
+              placeholder="¿Dónde te recogen? *"
+              value={origen}
+              onChange={(e) => setOrigen(e.target.value)}
+              className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800"
               required
             />
           </div>
-        </div>
 
-        {/* Origen y Destino */}
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">
-            📍 ¿Dónde te recogen?
-          </label>
-          <input
-            type="text"
-            placeholder="Ej: Barrio El Recreo, cerca a la cancha"
-            value={origen}
-            onChange={(e) => setOrigen(e.target.value)}
-            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
-            required
-          />
-        </div>
+          {/* Campo Destino */}
+          <div className="flex items-center gap-2 relative z-10">
+            <span className="w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
+              B
+            </span>
+            <input
+              type="text"
+              placeholder="¿A dónde vas? *"
+              value={destino}
+              onChange={(e) => setDestino(e.target.value)}
+              className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800"
+              required
+            />
+          </div>
 
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">
-            🏁 ¿A dónde vas?
-          </label>
-          <input
-            type="text"
-            placeholder="Ej: Aeropuerto / Comercio / Coco Viejo"
-            value={destino}
-            onChange={(e) => setDestino(e.target.value)}
-            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
-            required
-          />
-        </div>
-
-        {/* Seleccionables de Pasajeros, Maletas y Mascotas */}
-        <div className="bg-gray-50 p-3 rounded-xl border border-gray-200 space-y-3">
-          <label className="block text-xs font-bold text-gray-700">
-            👥 Opciones del Viaje
-          </label>
-
-          {/* Cantidad de Pasajeros */}
-          <div className="flex justify-between items-center text-xs">
-            <span className="text-gray-600 font-medium">Pasajeros:</span>
-            <div className="flex gap-1">
-              {[1, 2, 3, 4].map((num) => (
+          {/* Chips Rápidos de Destino */}
+          <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
+            {["Comercio", "Aeropuerto", "Coco Viejo", "Hospital"].map(
+              (chip) => (
                 <button
-                  key={num}
+                  key={chip}
                   type="button"
-                  onClick={() => setPassengersCount(num)}
-                  className={`px-3 py-1 rounded-lg font-bold transition-all ${
-                    passengersCount === num
-                      ? "bg-orange-500 text-white shadow-sm"
-                      : "bg-white border border-gray-200 text-gray-600 hover:bg-gray-100"
+                  onClick={() => setDestino(chip)}
+                  className="text-[10px] bg-white hover:bg-orange-50 border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg font-semibold transition-colors shrink-0 cursor-pointer"
+                >
+                  + {chip}
+                </button>
+              ),
+            )}
+          </div>
+        </div>
+
+        {/* Selección de Trayecto Rápida */}
+        <div className="grid grid-cols-3 gap-1.5">
+          {Object.entries(zonasTarifas).map(([key, item]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => handleSelectZona(key)}
+              className={`p-2 rounded-xl border text-[10px] font-bold transition-all text-center ${
+                zona === key
+                  ? "bg-orange-500 border-orange-500 text-white shadow-xs"
+                  : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <div>{item.nombre.split(" ")[0]}</div>
+              <div className="opacity-90 font-black">
+                ${item.base.toLocaleString()}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        {/* Control de Oferta de Tarifa */}
+        <div className="bg-orange-50/60 border border-orange-200/60 p-3 rounded-2xl flex items-center justify-between">
+          <div>
+            <span className="text-[10px] font-bold text-orange-800 uppercase tracking-wider block">
+              Tu Oferta
+            </span>
+            <span className="text-base font-black text-orange-600">
+              ${oferta.toLocaleString()}{" "}
+              <span className="text-[10px] text-orange-800 font-normal">
+                COP
+              </span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => handleAjustarOferta(-1000)}
+              className="w-8 h-8 rounded-xl bg-white border border-orange-200 text-orange-600 font-bold text-base flex items-center justify-center hover:bg-orange-100 transition-colors cursor-pointer"
+            >
+              -
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAjustarOferta(1000)}
+              className="w-8 h-8 rounded-xl bg-orange-500 text-white font-bold text-base flex items-center justify-center hover:bg-orange-600 transition-colors shadow-xs cursor-pointer"
+            >
+              +
+            </button>
+          </div>
+        </div>
+
+        {/* Opciones Adicionales (Desplegable Minimalista) */}
+        <div className="border-t border-gray-100 pt-2">
+          <button
+            type="button"
+            onClick={() => setShowExtraOptions(!showExtraOptions)}
+            className="w-full flex items-center justify-between text-xs text-gray-500 font-semibold py-1 px-1 hover:text-gray-800 transition-colors"
+          >
+            <span>
+              ⚙️ Opciones de viaje ({passengersCount} pas.{" "}
+              {hasLuggage ? "• Carga" : ""} {hasPets ? "• Mascota" : ""})
+            </span>
+            <span>{showExtraOptions ? "▲" : "▼"}</span>
+          </button>
+
+          {showExtraOptions && (
+            <div className="mt-2 p-3 bg-gray-50 rounded-xl space-y-3 border border-gray-200/60 text-xs">
+              {/* Pasajeros */}
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600 font-medium">Pasajeros:</span>
+                <div className="flex gap-1">
+                  {[1, 2, 3, 4].map((num) => (
+                    <button
+                      key={num}
+                      type="button"
+                      onClick={() => setPassengersCount(num)}
+                      className={`px-2.5 py-0.5 rounded-lg font-bold transition-all ${
+                        passengersCount === num
+                          ? "bg-orange-500 text-white"
+                          : "bg-white border border-gray-200 text-gray-600"
+                      }`}
+                    >
+                      {num}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Toggles Carga / Mascotas */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setHasLuggage(!hasLuggage)}
+                  className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                    hasLuggage
+                      ? "bg-orange-100 border-orange-400 text-orange-900"
+                      : "bg-white border-gray-200 text-gray-500"
                   }`}
                 >
-                  {num}
+                  🧳 {hasLuggage ? "Con Carga" : "Sin Carga"}
                 </button>
-              ))}
+
+                <button
+                  type="button"
+                  onClick={() => setHasPets(!hasPets)}
+                  className={`p-2 rounded-xl border text-center font-bold transition-all ${
+                    hasPets
+                      ? "bg-orange-100 border-orange-400 text-orange-900"
+                      : "bg-white border-gray-200 text-gray-500"
+                  }`}
+                >
+                  🐱 {hasPets ? "Con Mascota" : "Sin Mascota"}
+                </button>
+              </div>
+
+              {/* Detalle Opcional */}
+              <input
+                type="text"
+                placeholder="Notas extras (Ej: Frente al árbol grande)"
+                value={comentarios}
+                onChange={(e) => setComentarios(e.target.value)}
+                className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 outline-none"
+              />
             </div>
-          </div>
-
-          {/* Checkbox de Maletas y Mascotas */}
-          <div className="grid grid-cols-2 gap-2 pt-1 border-t border-gray-200/60">
-            <label
-              className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
-                hasLuggage
-                  ? "bg-orange-100 border-orange-400 text-orange-900"
-                  : "bg-white border-gray-200 text-gray-500"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={hasLuggage}
-                onChange={(e) => setHasLuggage(e.target.checked)}
-                className="hidden"
-              />
-              🧳 {hasLuggage ? "Con Carga/Maleta" : "Sin Carga"}
-            </label>
-
-            <label
-              className={`flex items-center justify-center gap-2 p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${
-                hasPets
-                  ? "bg-orange-100 border-orange-400 text-orange-900"
-                  : "bg-white border-gray-200 text-gray-500"
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={hasPets}
-                onChange={(e) => setHasPets(e.target.checked)}
-                className="hidden"
-              />
-              🐱 {hasPets ? "Con Mascota" : "Sin Mascota"}
-            </label>
-          </div>
+          )}
         </div>
 
-        {/* Selección de Trayecto / Zona */}
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">
-            🗺️ Tipo de Trayecto
-          </label>
-          <select
-            value={zona}
-            onChange={handleZonaChange}
-            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 font-semibold text-gray-700 outline-none cursor-pointer"
-          >
-            <option value="urbana">Urbana / Centro ($4.000 COP)</option>
-            <option value="coco">Centro ↔ Coco Viejo ($6.000 COP)</option>
-            <option value="aeropuerto">
-              Trayecto Aeropuerto ($15.000 COP)
-            </option>
-          </select>
-        </div>
-
-        {/* Oferta de Tarifa */}
-        <div className="bg-orange-50 p-3 rounded-xl border border-orange-100 space-y-2">
-          <div className="flex justify-between items-center text-xs">
-            <span className="font-bold text-orange-900">
-              Tu oferta para el motocarro:
-            </span>
-            <span className="font-black text-orange-600 text-sm">
-              ${Number(oferta).toLocaleString()} COP
-            </span>
-          </div>
-
-          <input
-            type="range"
-            min={zonasTarifas[zona].min}
-            max={zonasTarifas[zona].max}
-            step="1000"
-            value={oferta}
-            onChange={(e) => setOferta(Number(e.target.value))}
-            className="w-full accent-orange-500 cursor-pointer"
-          />
-
-          <div className="flex justify-between text-[10px] text-orange-700/70 font-medium">
-            <span>Sugerido: ${zonasTarifas[zona].min.toLocaleString()}</span>
-            <span>Máx: ${zonasTarifas[zona].max.toLocaleString()}</span>
-          </div>
-        </div>
-
-        {/* Notas Adicionales */}
-        <div>
-          <label className="block text-xs font-bold text-gray-600 mb-1">
-            📝 Detalles extras (opcional)
-          </label>
-          <input
-            type="text"
-            placeholder="Ej: Frente al árbol grande / Llamar al llegar"
-            value={comentarios}
-            onChange={(e) => setComentarios(e.target.value)}
-            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-orange-500 outline-none"
-          />
-        </div>
-
-        {/* Botón de envío */}
+        {/* Botón Principal de Acción */}
         <button
           type="submit"
-          className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl text-xs shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98"
+          className="w-full py-3.5 bg-orange-500 hover:bg-orange-600 text-white font-extrabold rounded-xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
         >
-          🛺 Solicitar Motocarro Ahora
+          <span>Solicitar Motocarro</span>
+          <span>🚀</span>
         </button>
       </form>
     </div>
