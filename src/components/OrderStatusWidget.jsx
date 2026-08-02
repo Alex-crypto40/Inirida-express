@@ -20,25 +20,22 @@ export default function OrderStatusWidget({
 
   // Escuchar actualizaciones por WebSockets en tiempo real
   useEffect(() => {
-    if (!activeOrder?._id) return;
+    const orderId = activeOrder?._id;
+    if (!orderId) return;
 
-    const SOCKET_URL = import.meta.env.VITE_API_URL
-      ? import.meta.env.VITE_API_URL.replace("/api", "")
-      : "http://localhost:5000";
-
+    const SOCKET_URL = API_URL.replace(/\/api\/?$/, "");
     const socket = io(SOCKET_URL);
 
     // Unirse a la sala única del pedido
-    socket.emit("join_order", `order_${activeOrder._id}`);
-    socket.emit("join_order", activeOrder._id);
+    socket.emit("join_order", `order_${orderId}`);
+    socket.emit("join_order", orderId);
 
     // Escuchar cuando el conductor acepta, propone o cambia estado
     const handleOrderUpdate = (updatedOrder) => {
       console.log("⚡ Orden actualizada en tiempo real:", updatedOrder);
       if (
         updatedOrder &&
-        (updatedOrder._id === activeOrder._id ||
-          updatedOrder.orderId === activeOrder._id)
+        (updatedOrder._id === orderId || updatedOrder.orderId === orderId)
       ) {
         setActiveOrder((prev) => ({
           ...prev,
@@ -63,6 +60,38 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
+  // Función para cancelar la carrera activada desde el botón
+  const handleCancelOrder = async () => {
+    const confirmCancel = window.confirm(
+      "¿Estás seguro de que deseas cancelar la solicitud de motocarro?"
+    );
+    if (!confirmCancel) return;
+
+    setLoadingAction(true);
+    try {
+      const res = await fetch(`${API_URL}/orders/${activeOrder._id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Cancelado por el cliente" }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        if (onCancelOrder) {
+          onCancelOrder(activeOrder._id);
+        }
+        setActiveOrder(null); // Oculta la tarjeta inmediatamente
+      } else {
+        alert(data.message || "No se pudo cancelar la carrera.");
+      }
+    } catch (error) {
+      console.error("Error al cancelar la carrera:", error);
+      alert("Error de conexión al intentar cancelar.");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
   // Extraer contraoferta pendiente (si existe)
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
@@ -84,7 +113,7 @@ export default function OrderStatusWidget({
             driverId: activeCounterOffer.driverId,
             acceptedPrice: activeCounterOffer.proposedPrice,
           }),
-        },
+        }
       );
 
       const data = await res.json();
@@ -114,7 +143,7 @@ export default function OrderStatusWidget({
           body: JSON.stringify({
             driverId: activeCounterOffer.driverId,
           }),
-        },
+        }
       );
 
       const data = await res.json();
@@ -139,7 +168,7 @@ export default function OrderStatusWidget({
   // Normalizar PIN de seguridad
   const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
 
-  // Mapeo de estados de la orden (se incluye 'counter_offered')
+  // Mapeo de estados de la orden
   const hasCounterOffer =
     Boolean(activeCounterOffer) &&
     (status === "pending" ||
@@ -191,10 +220,10 @@ export default function OrderStatusWidget({
               hasCounterOffer
                 ? "bg-orange-500 text-white animate-bounce"
                 : isPending
-                  ? "bg-warning text-dark animate-pulse"
-                  : isAccepted
-                    ? "bg-success text-white"
-                    : "bg-secondary"
+                ? "bg-warning text-dark animate-pulse"
+                : isAccepted
+                ? "bg-success text-white"
+                : "bg-secondary"
             }`}
           >
             {hasCounterOffer && "¡Nueva Oferta Recibida!"}
@@ -245,20 +274,31 @@ export default function OrderStatusWidget({
 
         {/* ESTADO 1: BUSCANDO CONDUCTOR */}
         {isPending && (
-          <div className="text-center my-3">
-            <div
-              className="spinner-border text-warning spinner-border-sm me-2"
-              role="status"
-            ></div>
-            <p className="text-xs text-gray-500 font-medium mt-1 mb-0">
-              Notificando a conductores cercanos en Inírida...
-            </p>
+          <div className="text-center my-3 space-y-3">
+            <div className="flex items-center justify-center gap-2">
+              <div
+                className="spinner-border text-warning spinner-border-sm"
+                role="status"
+              ></div>
+              <p className="text-xs text-gray-500 font-medium m-0">
+                Notificando a conductores cercanos en Inírida...
+              </p>
+            </div>
 
+            {/* BOTÓN CANCELAR CON ESTILOS DESTACADOS Y FEEDBACK */}
             <button
-              className="btn btn-outline-danger btn-sm w-100 mt-3 rounded-xl font-bold text-xs"
-              onClick={() => onCancelOrder && onCancelOrder(activeOrder._id)}
+              disabled={loadingAction}
+              onClick={handleCancelOrder}
+              type="button"
+              className="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 hover:border-red-300 font-bold text-xs py-2.5 px-4 rounded-xl transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer shadow-xs active:scale-95 disabled:opacity-50"
             >
-              Cancelar Carrera
+              {loadingAction ? (
+                <span>Cancelando carrera...</span>
+              ) : (
+                <>
+                  <span>🚫</span> Cancelar Carrera
+                </>
+              )}
             </button>
           </div>
         )}
@@ -266,7 +306,7 @@ export default function OrderStatusWidget({
         {/* ESTADO 2: CONDUCTOR EN CAMINO */}
         {isAccepted && (
           <div className="space-y-2 mt-2">
-            {/* PIN DE SEGURIDAD (Opcional según tipo de servicio) */}
+            {/* PIN DE SEGURIDAD */}
             {pinCode && activeOrder.serviceType !== "ride" && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-2 text-center">
                 <span className="text-[10px] text-orange-800 font-bold uppercase tracking-wider block">
@@ -306,6 +346,7 @@ export default function OrderStatusWidget({
             {/* BOTÓN ÚNICO DE CHAT DIRECTO */}
             <div className="pt-1">
               <button
+                type="button"
                 className="btn btn-warning text-white btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-2 w-100 py-2 shadow-sm cursor-pointer"
                 style={{ backgroundColor: "#f97316", borderColor: "#ea580c" }}
                 onClick={() => setShowChat(true)}
