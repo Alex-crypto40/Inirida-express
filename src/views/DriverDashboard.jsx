@@ -49,19 +49,7 @@ export default function DriverDashboard() {
     }
   };
 
-  // 2. Escuchar pedidos periódicamente cuando está En Línea
-  useEffect(() => {
-    let interval;
-    if (driver.isOnline) {
-      fetchAvailableOrders();
-      interval = setInterval(fetchAvailableOrders, 4000);
-    } else {
-      setAvailableOrders([]);
-    }
-    return () => clearInterval(interval);
-  }, [driver.isOnline]);
-
-  // 3. Consultar si tiene una orden activa al cargar/conectar
+  // 2. Consultar si tiene una orden activa
   const checkActiveOrder = async () => {
     if (!driver?.id) return;
     try {
@@ -77,12 +65,23 @@ export default function DriverDashboard() {
     }
   };
 
+  // 3. Control de Polling periódico cuando el conductor está En Línea (Unificado)
   useEffect(() => {
+    let interval;
     if (driver.isOnline) {
+      // Primera ejecución
       checkActiveOrder();
       fetchAvailableOrders();
+
+      // Intervalo de refresco cada 4 segundos
+      interval = setInterval(() => {
+        fetchAvailableOrders();
+      }, 4000);
+    } else {
+      setAvailableOrders([]);
     }
-  }, [driver.isOnline]);
+    return () => clearInterval(interval);
+  }, [driver.isOnline, driver.id]);
 
   // Handler para ajustar el contador (- / +) respetando topes
   const handleAjustarTarifa = (orderId, delta, basePrice) => {
@@ -186,11 +185,15 @@ export default function DriverDashboard() {
     }
   };
 
-  // 6. Completar Pedido (Sin PIN para Carreras, Con PIN para Mandados/Tiendas)
+  // 6. Completar Pedido (Garantizar compatibilidad con 'ride' sin requerir PIN)
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
 
-    const isRide = activeOrder.serviceType === "ride";
+    // Verificar flexibilizadamente si la orden es de tipo Carrera/Pasajero
+    const isRide =
+      activeOrder.serviceType === "ride" ||
+      activeOrder.orderType === "ride" ||
+      activeOrder.type === "ride";
 
     // Si NO es carrera (es paquete/tienda) y no ingresó el PIN, exigirlo
     if (!isRide && !inputPin.trim()) {
@@ -241,6 +244,13 @@ export default function DriverDashboard() {
     }
   };
 
+  // Determinar si la orden activa actual es de pasajeros
+  const isCurrentActiveRide =
+    activeOrder &&
+    (activeOrder.serviceType === "ride" ||
+      activeOrder.orderType === "ride" ||
+      activeOrder.type === "ride");
+
   return (
     <div className="max-w-md mx-auto min-h-screen bg-gray-50 p-4 pb-20">
       {/* Encabezado del Domiciliario */}
@@ -285,9 +295,7 @@ export default function DriverDashboard() {
         <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-orange-500 mb-6 space-y-4">
           <div className="flex justify-between items-center pb-2 border-b border-gray-100">
             <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full uppercase">
-              {activeOrder.serviceType === "ride"
-                ? "🛺 Carrera Activa"
-                : "📦 Pedido en Curso"}
+              {isCurrentActiveRide ? "🛺 Carrera Activa" : "📦 Pedido en Curso"}
             </span>
             <span className="font-extrabold text-orange-600 text-xl">
               ${activeOrder.total?.toLocaleString()}
@@ -295,18 +303,18 @@ export default function DriverDashboard() {
           </div>
 
           {/* Badges de Detalles de Carrera */}
-          {activeOrder.serviceType === "ride" && activeOrder.rideDetails && (
+          {isCurrentActiveRide && activeOrder.rideDetails && (
             <div className="flex flex-wrap gap-2 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
-              <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+              <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
                 👥 {activeOrder.rideDetails.passengersCount || 1} Pasajero(s)
               </span>
               {activeOrder.rideDetails.hasLuggage && (
-                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
                   🧳 Con Carga/Maleta
                 </span>
               )}
               {activeOrder.rideDetails.hasPets && (
-                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
+                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
                   🐱 Con Mascota
                 </span>
               )}
@@ -328,16 +336,16 @@ export default function DriverDashboard() {
             {/* Información de Recogida / Comercio */}
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
-                {activeOrder.serviceType === "ride"
+                {isCurrentActiveRide
                   ? "📍 Punto A (Recoger en)"
                   : "🏪 Comercio / Tienda"}
               </p>
               <p className="font-bold text-gray-800">
-                {activeOrder.serviceType === "ride"
-                  ? activeOrder.customer?.address
+                {isCurrentActiveRide
+                  ? activeOrder.customer?.address || "Ubicación del cliente"
                   : activeOrder.store?.name || "Comercio Aliado"}
               </p>
-              {activeOrder.serviceType !== "ride" && (
+              {!isCurrentActiveRide && (
                 <p className="text-xs text-gray-500">
                   📍 {activeOrder.store?.address || "Dirección del comercio"}
                 </p>
@@ -347,7 +355,7 @@ export default function DriverDashboard() {
             {/* Información del Cliente / Destino */}
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
-                {activeOrder.serviceType === "ride"
+                {isCurrentActiveRide
                   ? "🏁 Punto B (Destino / Pasajero)"
                   : "👤 Cliente / Entrega"}
               </p>
@@ -366,7 +374,7 @@ export default function DriverDashboard() {
           </div>
 
           {/* MÓDULO DE FINALIZACIÓN SEGÚN TIPO DE SERVICIO */}
-          {activeOrder.serviceType === "ride" ? (
+          {isCurrentActiveRide ? (
             /* 🛺 FINALIZAR CARRERA DIRECTA (SIN PIN) */
             <button
               onClick={handleCompleteOrder}
@@ -427,7 +435,11 @@ export default function DriverDashboard() {
           ) : (
             <div className="space-y-3">
               {availableOrders.map((order) => {
-                const isRide = order.serviceType === "ride" || order.isMandado;
+                const isRide =
+                  order.serviceType === "ride" ||
+                  order.orderType === "ride" ||
+                  order.type === "ride" ||
+                  order.isMandado;
                 const clientPrice = order.total || 4000;
                 const currentProposed = driverOffers[order._id] || clientPrice;
                 const isModified = currentProposed !== clientPrice;
@@ -544,7 +556,6 @@ export default function DriverDashboard() {
 
                         {/* Botones de Acción */}
                         <div className="grid grid-cols-2 gap-2 pt-1">
-                          {/* Aceptar directo por la oferta original del cliente */}
                           <button
                             onClick={() => handleTakeOrder(order._id)}
                             disabled={loading}
@@ -553,7 +564,6 @@ export default function DriverDashboard() {
                             Aceptar ${clientPrice.toLocaleString()}
                           </button>
 
-                          {/* Enviar Contraoferta si ajustó el precio */}
                           <button
                             onClick={() =>
                               isModified

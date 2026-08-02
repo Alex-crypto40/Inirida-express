@@ -120,7 +120,7 @@ export const takeOrder = async (req, res) => {
     let order = await Order.findOneAndUpdate(
       { _id: orderId, status: "pending_driver" },
       { driver: driverId, status: "assigned" },
-      { returnDocument: "after" }, // 👈 Ajustado para evitar la advertencia de Mongoose en Render
+      { returnDocument: "after" },
     )
       .populate("store", "name address phone")
       .populate("driver", "name phone vehicleType plateNumber");
@@ -176,8 +176,10 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Validar PIN de entrega si el estado pasa a completado
-    if (status === "completed") {
+    // 💡 AJUSTE CLAVE: Solo exigir PIN si el servicio NO es una carrera de pasajero ("ride")
+    const isRide = order.serviceType === "ride";
+
+    if (status === "completed" && !isRide) {
       if (!pin) {
         return res.status(400).json({
           message:
@@ -207,7 +209,9 @@ export const updateOrderStatus = async (req, res) => {
     res.json({
       message:
         status === "completed"
-          ? "¡Servicio verificado y completado con éxito mediante PIN! 🏁"
+          ? isRide
+            ? "¡Carrera completada con éxito! 🏁"
+            : "¡Servicio verificado y completado con éxito mediante PIN! 🏁"
           : `Estado actualizado a: ${status}`,
       order,
     });
@@ -217,7 +221,44 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// 6. Calificar el servicio
+// 6. Enviar Contraoferta al Cliente (NUEVO)
+export const sendCounterOffer = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { driverId, driverName, proposedPrice } = req.body;
+
+    if (!proposedPrice || proposedPrice <= 0) {
+      return res.status(400).json({ message: "Precio de propuesta inválido." });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Solicitud no encontrada." });
+    }
+
+    // Emitir la contraoferta al cliente vía WebSockets
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`order_${orderId}`).emit("counter_offer_received", {
+        orderId,
+        driverId,
+        driverName,
+        proposedPrice,
+      });
+    }
+
+    res.json({
+      message: "Contraoferta enviada con éxito al cliente 📲",
+      orderId,
+      proposedPrice,
+    });
+  } catch (error) {
+    console.error("Error al enviar contraoferta:", error);
+    res.status(500).json({ message: "Error al procesar la propuesta." });
+  }
+};
+
+// 7. Calificar el servicio
 export const rateOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -247,7 +288,7 @@ export const rateOrder = async (req, res) => {
   }
 };
 
-// 7. Obtener la carrera activa de un domiciliario
+// 8. Obtener la carrera activa de un domiciliario
 export const getActiveDriverOrder = async (req, res) => {
   try {
     const driverId = req.params.driverId || req.user?._id;
