@@ -11,7 +11,7 @@ function MotocarroForm({ onOrderCreated }) {
   // Estado para la lectura GPS
   const [loadingGps, setLoadingGps] = useState(false);
 
-  // 2. Opciones de viaje (por defecto simples)
+  // 2. Opciones de viaje
   const [zona, setZona] = useState("urbana");
   const [oferta, setOferta] = useState(4000);
   const [passengersCount, setPassengersCount] = useState(1);
@@ -33,13 +33,19 @@ function MotocarroForm({ onOrderCreated }) {
     setOferta(zonasTarifas[nuevaZona].base);
   };
 
-  // Ajustar oferta con piso dinámico según la zona activa (Mínimo estricto $4.000)
-  const handleAjustarOferta = (monto) => {
-    const minPermitido = zonasTarifas[zona]?.base || 4000;
-    setOferta((prev) => Math.max(minPermitido, prev + monto));
+  // Función para autoseleccionar zona al tocar chips rápidos
+  const handleQuickChipSelect = (chipName) => {
+    setDestino(chipName);
+    if (chipName === "Aeropuerto") {
+      handleSelectZona("aeropuerto");
+    } else if (chipName === "Coco Viejo") {
+      handleSelectZona("coco");
+    } else {
+      handleSelectZona("urbana");
+    }
   };
 
-  // Función para capturar ubicación con GPS / Google Maps
+  // Función para capturar ubicación con GPS
   const obtenerUbicacionGPS = () => {
     if (!navigator.geolocation) {
       alert("Tu navegador o dispositivo no soporta geolocalización.");
@@ -53,9 +59,8 @@ function MotocarroForm({ onOrderCreated }) {
         const { latitude, longitude } = position.coords;
 
         try {
-          // Intentamos obtener dirección legible desde OpenStreetMap (Nominatim)
           const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
           );
           const data = await res.json();
 
@@ -67,11 +72,9 @@ function MotocarroForm({ onOrderCreated }) {
           if (barrioOCalle) {
             setOrigen(`📍 Ubicación GPS (${barrioOCalle}, Inírida)`);
           } else {
-            // Si no da nombre exacto de barrio, guardamos el enlace exacto a Google Maps
             setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
           }
         } catch (error) {
-          // En caso de fallo de red en la geocodificación, dejamos el link directo
           setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
         } finally {
           setLoadingGps(false);
@@ -80,10 +83,10 @@ function MotocarroForm({ onOrderCreated }) {
       (error) => {
         setLoadingGps(false);
         alert(
-          "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador.",
+          "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador."
         );
       },
-      { enableHighAccuracy: true, timeout: 10000 },
+      { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
@@ -91,7 +94,7 @@ function MotocarroForm({ onOrderCreated }) {
     e.preventDefault();
     if (!origen.trim() || !destino.trim() || !telefono.trim()) {
       alert(
-        "Por favor completa los campos obligatorios (Celular, Origen y Destino).",
+        "Por favor completa los campos obligatorios (Celular, Origen y Destino)."
       );
       return;
     }
@@ -140,7 +143,7 @@ function MotocarroForm({ onOrderCreated }) {
       if (res.ok) {
         const data = await res.json();
         alert(
-          `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`,
+          `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`
         );
 
         if (onOrderCreated) {
@@ -247,7 +250,7 @@ function MotocarroForm({ onOrderCreated }) {
               <button
                 key={chip}
                 type="button"
-                onClick={() => setDestino(chip)}
+                onClick={() => handleQuickChipSelect(chip)}
                 className="text-[10px] bg-white hover:bg-orange-50 border border-gray-200 text-gray-600 px-2.5 py-1 rounded-lg font-semibold transition-colors shrink-0 cursor-pointer"
               >
                 + {chip}
@@ -277,40 +280,24 @@ function MotocarroForm({ onOrderCreated }) {
           ))}
         </div>
 
-        {/* Control de Oferta de Tarifa */}
-        <div className="bg-orange-50/60 border border-orange-200/60 p-3 rounded-2xl flex items-center justify-between">
+        {/* Resumen Fijo de Tarifa del Trayecto (Sin Contador Manual) */}
+        <div className="bg-orange-50/60 border border-orange-200/80 p-3 rounded-2xl flex items-center justify-between">
           <div>
             <span className="text-[10px] font-bold text-orange-800 uppercase tracking-wider block">
-              Tu Oferta
+              Tarifa Estimada del Trayecto
             </span>
-            <span className="text-base font-black text-orange-600">
-              ${oferta.toLocaleString()}{" "}
-              <span className="text-[10px] text-orange-800 font-normal">
-                COP
-              </span>
+            <span className="text-[11px] text-gray-600 font-medium">
+              {zonasTarifas[zona]?.nombre}
             </span>
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={() => handleAjustarOferta(-1000)}
-              disabled={oferta <= (zonasTarifas[zona]?.base || 4000)}
-              className={`w-8 h-8 rounded-xl bg-white border border-orange-200 text-orange-600 font-bold text-base flex items-center justify-center transition-colors ${
-                oferta <= (zonasTarifas[zona]?.base || 4000)
-                  ? "opacity-40 cursor-not-allowed"
-                  : "hover:bg-orange-100 cursor-pointer"
-              }`}
-            >
-              -
-            </button>
-            <button
-              type="button"
-              onClick={() => handleAjustarOferta(1000)}
-              className="w-8 h-8 rounded-xl bg-orange-500 text-white font-bold text-base flex items-center justify-center hover:bg-orange-600 transition-colors shadow-xs cursor-pointer"
-            >
-              +
-            </button>
+          <div className="text-right">
+            <span className="text-xl font-black text-orange-600 block">
+              ${oferta.toLocaleString()}{" "}
+              <small className="text-[10px] font-semibold text-orange-800">
+                COP
+              </small>
+            </span>
           </div>
         </div>
 
