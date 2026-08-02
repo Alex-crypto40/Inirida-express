@@ -23,9 +23,18 @@ function MotocarroForm({ onOrderCreated }) {
 
   // Configuración de Zonas de Inírida
   const zonasTarifas = {
-    urbana: { nombre: "Urbana / Centro", base: 4000 },
-    coco: { nombre: "Centro ↔ Coco Viejo", base: 6000 },
-    aeropuerto: { nombre: "Trayecto Aeropuerto", base: 12000 },
+    urbana: { nombre: "Urbana", base: 4000, label: "Urbana ($4k)" },
+    coco: {
+      nombre: "Centro ↔ Coco Viejo",
+      base: 6000,
+      label: "Especial ($6k)",
+    },
+    aeropuerto: {
+      nombre: "Trayecto Aeropuerto",
+      base: 12000,
+      label: "Aeropuerto ($12k)",
+    },
+    acuerdo: { nombre: "Acuerdo / Negociar", base: 0, label: "🤝 Al Chat" },
   };
 
   const handleSelectZona = (nuevaZona) => {
@@ -40,6 +49,8 @@ function MotocarroForm({ onOrderCreated }) {
       handleSelectZona("aeropuerto");
     } else if (chipName === "Coco Viejo") {
       handleSelectZona("coco");
+    } else if (chipName === "Sabanitas" || chipName === "Caño Vitina") {
+      handleSelectZona("acuerdo");
     } else {
       handleSelectZona("urbana");
     }
@@ -60,7 +71,7 @@ function MotocarroForm({ onOrderCreated }) {
 
         try {
           const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
           );
           const data = await res.json();
 
@@ -83,10 +94,10 @@ function MotocarroForm({ onOrderCreated }) {
       (error) => {
         setLoadingGps(false);
         alert(
-          "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador."
+          "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador.",
         );
       },
-      { enableHighAccuracy: true, timeout: 10000 }
+      { enableHighAccuracy: true, timeout: 10000 },
     );
   };
 
@@ -94,10 +105,13 @@ function MotocarroForm({ onOrderCreated }) {
     e.preventDefault();
     if (!origen.trim() || !destino.trim() || !telefono.trim()) {
       alert(
-        "Por favor completa los campos obligatorios (Celular, Origen y Destino)."
+        "Por favor completa los campos obligatorios (Celular, Origen y Destino).",
       );
       return;
     }
+
+    const esAcuerdo = zona === "acuerdo";
+    const nombreTarifa = zonasTarifas[zona]?.nombre || "Zona General";
 
     const pedidoMotocarro = {
       serviceType: "ride",
@@ -107,18 +121,17 @@ function MotocarroForm({ onOrderCreated }) {
         passengersCount: Number(passengersCount),
         hasLuggage: Boolean(hasLuggage),
         hasPets: Boolean(hasPets),
+        isNegotiable: esAcuerdo,
       },
       customer: {
         name: nombre.trim() || "Cliente Motocarro",
         phone: telefono.trim(),
         address: origen,
-        notes: `Destino: ${destino}.`,
+        notes: `Destino: ${destino}.${esAcuerdo ? " [Tarifa a convenir en Chat]" : ""}`,
       },
       items: [
         {
-          name: `Carrera Motocarro (${
-            zonasTarifas[zona]?.nombre || "Zona General"
-          })`,
+          name: `Carrera Motocarro (${nombreTarifa})`,
           price: Number(oferta),
           quantity: 1,
         },
@@ -142,9 +155,11 @@ function MotocarroForm({ onOrderCreated }) {
 
       if (res.ok) {
         const data = await res.json();
-        alert(
-          `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`
-        );
+        const msgExito = esAcuerdo
+          ? "🛺 ¡Carrera solicitada! Acuerda la tarifa directamente en el chat..."
+          : `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`;
+
+        alert(msgExito);
 
         if (onOrderCreated) {
           onOrderCreated(data.order || data);
@@ -246,7 +261,14 @@ function MotocarroForm({ onOrderCreated }) {
 
           {/* Chips Rápidos de Destino */}
           <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
-            {["Centro", "Aeropuerto", "Coco Viejo", "Hospital"].map((chip) => (
+            {[
+              "Centro",
+              "Aeropuerto",
+              "Coco Viejo",
+              "Sabanitas",
+              "Caño Vitina",
+              "Hospital",
+            ].map((chip) => (
               <button
                 key={chip}
                 type="button"
@@ -259,54 +281,84 @@ function MotocarroForm({ onOrderCreated }) {
           </div>
         </div>
 
-        {/* Selección de Trayecto Rápida */}
-        <div className="grid grid-cols-3 gap-1.5">
-          {Object.entries(zonasTarifas).map(([key, item]) => (
+        {/* Seleccionar Tarifa / Tipo de Trayecto */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
+            Selecciona la tarifa o trayecto
+          </label>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+            {/* Urbana */}
             <button
-              key={key}
               type="button"
-              onClick={() => handleSelectZona(key)}
-              className={`p-2 rounded-xl border text-[10px] font-bold transition-all text-center ${
-                zona === key
-                  ? "bg-orange-500 border-orange-500 text-white shadow-xs"
+              onClick={() => handleSelectZona("urbana")}
+              className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                zona === "urbana"
+                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
                   : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
               }`}
             >
-              <div>{item.nombre.split(" ")[0]}</div>
-              <div className="opacity-90 font-black">
-                ${item.base.toLocaleString()}
-              </div>
+              <span className="block text-[10px]">Urbana</span>
+              <span className="block text-xs font-black">$4.000</span>
             </button>
-          ))}
-        </div>
 
-        {/* Resumen Fijo de Tarifa del Trayecto (Sin Contador Manual) */}
-        <div className="bg-orange-50/60 border border-orange-200/80 p-3 rounded-2xl flex items-center justify-between">
-          <div>
-            <span className="text-[10px] font-bold text-orange-800 uppercase tracking-wider block">
-              Tarifa Estimada del Trayecto
-            </span>
-            <span className="text-[11px] text-gray-600 font-medium">
-              {zonasTarifas[zona]?.nombre}
-            </span>
+            {/* Centro / Especial */}
+            <button
+              type="button"
+              onClick={() => handleSelectZona("coco")}
+              className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                zona === "coco"
+                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
+                  : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <span className="block text-[10px]">Centro</span>
+              <span className="block text-xs font-black">$6.000</span>
+            </button>
+
+            {/* Aeropuerto */}
+            <button
+              type="button"
+              onClick={() => handleSelectZona("aeropuerto")}
+              className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                zona === "aeropuerto"
+                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
+                  : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              <span className="block text-[10px]">Aeropuerto</span>
+              <span className="block text-xs font-black">$12.000</span>
+            </button>
+
+            {/* Negociar / Sabanitas / Caño Vitina */}
+            <button
+              type="button"
+              onClick={() => handleSelectZona("acuerdo")}
+              className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
+                zona === "acuerdo"
+                  ? "bg-amber-500 border-amber-500 text-white shadow-xs font-bold"
+                  : "bg-amber-50/60 border-amber-200 text-amber-800 hover:bg-amber-100/80"
+              }`}
+            >
+              <span className="block text-[10px]">Sabanitas/Otros</span>
+              <span className="block text-xs font-black">🤝 Al Chat</span>
+            </button>
           </div>
 
-          <div className="text-right">
-            <span className="text-xl font-black text-orange-600 block">
-              ${oferta.toLocaleString()}{" "}
-              <small className="text-[10px] font-semibold text-orange-800">
-                COP
-              </small>
-            </span>
-          </div>
+          {/* Nota informativa cuando se elige Negociar */}
+          {zona === "acuerdo" && (
+            <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-medium leading-tight">
+              💬 <strong>Zona alejada:</strong> Acuerda el valor final con el
+              mototaxista por el chat de la app.
+            </div>
+          )}
         </div>
 
         {/* Opciones Adicionales (Desplegable Minimalista) */}
-        <div className="border-t border-gray-100 pt-2">
+        <div className="border-t border-gray-100 pt-1">
           <button
             type="button"
             onClick={() => setShowExtraOptions(!showExtraOptions)}
-            className="w-full flex items-center justify-between text-xs text-gray-500 font-semibold py-1 px-1 hover:text-gray-800 transition-colors"
+            className="w-full flex items-center justify-between text-xs text-gray-500 font-semibold py-1 px-1 hover:text-gray-800 transition-colors cursor-pointer"
           >
             <span>
               ⚙️ Opciones de viaje ({passengersCount} pas.{" "}
@@ -377,13 +429,17 @@ function MotocarroForm({ onOrderCreated }) {
           )}
         </div>
 
-        {/* Botón Principal de Acción */}
+        {/* Botón Principal de Acción con Precio o Leyenda Directa */}
         <button
           type="submit"
-          className="w-full py-3.5 bg-orange-500 hover:bg-orange-600 text-white font-extrabold rounded-xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
+          className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-between px-4"
         >
-          <span>Solicitar Motocarro</span>
-          <span>🚀</span>
+          <span>Solicitar Motocarro 🚀</span>
+          <span className="bg-white/20 px-3 py-1 rounded-xl text-xs backdrop-blur-xs font-black">
+            {zona === "acuerdo"
+              ? "A convenir 💬"
+              : `$${oferta.toLocaleString()} COP`}
+          </span>
         </button>
       </form>
     </div>
