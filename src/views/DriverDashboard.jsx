@@ -19,6 +19,12 @@ export default function DriverDashboard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
+  // Estado para la contraoferta individual de cada orden disponible { [orderId]: monto }
+  const [driverOffers, setDriverOffers] = useState({});
+
+  // Maximum increment allowed over the client's offer
+  const MAX_INCREMENT = 3000;
+
   // 1. Cargar pedidos disponibles
   const fetchAvailableOrders = async () => {
     try {
@@ -26,6 +32,17 @@ export default function DriverDashboard() {
       if (res.ok) {
         const data = await res.json();
         setAvailableOrders(data);
+
+        // Inicializar las ofertas propuestas por el conductor con el valor base de cada orden
+        setDriverOffers((prev) => {
+          const nextState = { ...prev };
+          data.forEach((order) => {
+            if (!nextState[order._id]) {
+              nextState[order._id] = order.total || 4000;
+            }
+          });
+          return nextState;
+        });
       }
     } catch (error) {
       console.error("Error al cargar pedidos:", error);
@@ -67,6 +84,22 @@ export default function DriverDashboard() {
     }
   }, [driver.isOnline]);
 
+  // Handler para ajustar el contador (- / +) respetando topes
+  const handleAjustarTarifa = (orderId, delta, basePrice) => {
+    setDriverOffers((prev) => {
+      const currentVal = prev[orderId] || basePrice;
+      const minPermitido = basePrice;
+      const maxPermitido = basePrice + MAX_INCREMENT;
+
+      const nuevoValor = Math.min(
+        maxPermitido,
+        Math.max(minPermitido, currentVal + delta),
+      );
+
+      return { ...prev, [orderId]: nuevoValor };
+    });
+  };
+
   // 4. Cambiar estado En línea / Desconectado
   const toggleOnline = async () => {
     if (!driver.id) {
@@ -90,7 +123,7 @@ export default function DriverDashboard() {
     }
   };
 
-  // 5. Tomar pedido
+  // 5. Tomar pedido al precio directo ofertado por el cliente
   const handleTakeOrder = async (orderId) => {
     setLoading(true);
     setMessage("");
@@ -113,6 +146,41 @@ export default function DriverDashboard() {
       }
     } catch (error) {
       alert("Error de conexión al intentar tomar la carrera.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 5B. Enviar Contraoferta al cliente (Flujo Inverso)
+  const handleSendCounterOffer = async (orderId) => {
+    const proposedPrice = driverOffers[orderId];
+    if (!proposedPrice) return;
+
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/orders/${orderId}/counter-offer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverId: driver.id,
+          driverName: driver.name || "Conductor Motocarro",
+          proposedPrice: Number(proposedPrice),
+        }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setMessage(
+          `Oferta enviada por $${proposedPrice.toLocaleString()} COP. Esperando respuesta... ⏳`,
+        );
+        fetchAvailableOrders();
+      } else {
+        alert(data.message || "Error al enviar la propuesta.");
+      }
+    } catch (error) {
+      console.error("Error al enviar contraoferta:", error);
+      alert("Error al enviar la oferta al cliente.");
     } finally {
       setLoading(false);
     }
@@ -206,7 +274,7 @@ export default function DriverDashboard() {
             </span>
           </div>
 
-          {/* Badges de Detalles de Carrera (Pasajeros, Carga, Mascotas) */}
+          {/* Badges de Detalles de Carrera */}
           {activeOrder.serviceType === "ride" && activeOrder.rideDetails && (
             <div className="flex flex-wrap gap-2 mb-4 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
               <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
@@ -331,6 +399,10 @@ export default function DriverDashboard() {
             <div className="space-y-3">
               {availableOrders.map((order) => {
                 const isRide = order.serviceType === "ride" || order.isMandado;
+                const clientPrice = order.total || 4000;
+                const currentProposed = driverOffers[order._id] || clientPrice;
+                const isModified = currentProposed !== clientPrice;
+
                 return (
                   <div
                     key={order._id}
@@ -349,7 +421,9 @@ export default function DriverDashboard() {
                         </span>
                         <h4 className="font-bold text-gray-800 text-sm">
                           {isRide
-                            ? `Origen: ${order.customer?.address || "Zona Urbana"}`
+                            ? `Origen: ${
+                                order.customer?.address || "Zona Urbana"
+                              }`
                             : order.store?.name || "Pedido de Comercio"}
                         </h4>
                         <p className="text-xs text-gray-500">
@@ -358,12 +432,17 @@ export default function DriverDashboard() {
                             : `📍 Entregar en: ${order.customer?.address}`}
                         </p>
                       </div>
-                      <span className="font-extrabold text-green-600 text-sm">
-                        ${order.total?.toLocaleString()}
-                      </span>
+                      <div className="text-right">
+                        <span className="text-[10px] text-gray-400 block font-medium">
+                          Oferta Cliente
+                        </span>
+                        <span className="font-extrabold text-gray-800 text-sm">
+                          ${clientPrice.toLocaleString()}
+                        </span>
+                      </div>
                     </div>
 
-                    {/* Mostrar Badges visuales en la tarjeta disponible */}
+                    {/* Mostrar Badges visuales */}
                     {order.rideDetails && (
                       <div className="flex flex-wrap gap-1.5 my-2">
                         <span className="bg-gray-100 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
@@ -382,21 +461,109 @@ export default function DriverDashboard() {
                       </div>
                     )}
 
-                    <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50">
-                      <span className="text-xs text-gray-400">
-                        Tarifa total:{" "}
-                        <strong className="text-gray-700">
-                          ${order.total?.toLocaleString()} COP
-                        </strong>
-                      </span>
-                      <button
-                        onClick={() => handleTakeOrder(order._id)}
-                        disabled={loading}
-                        className="bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-transform cursor-pointer"
-                      >
-                        {loading ? "Tomando..." : "Tomar Carrera 🛵"}
-                      </button>
-                    </div>
+                    {/* CONTROLES DE TARIFA E INVERSO (SOLO PARA MOTOCARROS) */}
+                    {isRide && (
+                      <div className="mt-2 pt-2 border-t border-gray-100 bg-orange-50/50 p-2.5 rounded-xl space-y-2">
+                        <div className="flex justify-between items-center">
+                          <span className="text-xs font-bold text-orange-900">
+                            Tu Propuesta:
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAjustarTarifa(
+                                  order._id,
+                                  -1000,
+                                  clientPrice,
+                                )
+                              }
+                              disabled={currentProposed <= clientPrice}
+                              className={`w-7 h-7 rounded-lg bg-white border border-orange-200 text-orange-700 font-bold text-sm flex items-center justify-center ${
+                                currentProposed <= clientPrice
+                                  ? "opacity-30 cursor-not-allowed"
+                                  : "hover:bg-orange-100 cursor-pointer"
+                              }`}
+                            >
+                              -
+                            </button>
+                            <span className="font-black text-orange-600 text-sm min-w-[65px] text-center">
+                              ${currentProposed.toLocaleString()}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleAjustarTarifa(
+                                  order._id,
+                                  1000,
+                                  clientPrice,
+                                )
+                              }
+                              disabled={
+                                currentProposed >= clientPrice + MAX_INCREMENT
+                              }
+                              className={`w-7 h-7 rounded-lg bg-orange-500 text-white font-bold text-sm flex items-center justify-center ${
+                                currentProposed >= clientPrice + MAX_INCREMENT
+                                  ? "opacity-30 cursor-not-allowed"
+                                  : "hover:bg-orange-600 cursor-pointer"
+                              }`}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Botones de Acción */}
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {/* Aceptar directo por la oferta original del cliente */}
+                          <button
+                            onClick={() => handleTakeOrder(order._id)}
+                            disabled={loading}
+                            className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-xl text-xs font-bold transition-all cursor-pointer truncate"
+                          >
+                            Aceptar ${clientPrice.toLocaleString()}
+                          </button>
+
+                          {/* Enviar Contraoferta si ajustó el precio */}
+                          <button
+                            onClick={() =>
+                              isModified
+                                ? handleSendCounterOffer(order._id)
+                                : handleTakeOrder(order._id)
+                            }
+                            disabled={loading}
+                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer truncate ${
+                              isModified
+                                ? "bg-orange-500 hover:bg-orange-600 text-white shadow-xs"
+                                : "bg-gray-200 text-gray-500 hover:bg-gray-300"
+                            }`}
+                          >
+                            {isModified
+                              ? `Ofertar $${currentProposed.toLocaleString()}`
+                              : "Misma Oferta"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* BANDERAS DE TIENDAS / PEDIDOS REGULARES */}
+                    {!isRide && (
+                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50">
+                        <span className="text-xs text-gray-400">
+                          Total Pedido:{" "}
+                          <strong className="text-gray-700">
+                            ${clientPrice.toLocaleString()} COP
+                          </strong>
+                        </span>
+                        <button
+                          onClick={() => handleTakeOrder(order._id)}
+                          disabled={loading}
+                          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-transform cursor-pointer"
+                        >
+                          {loading ? "Tomando..." : "Tomar Pedido 📦"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

@@ -8,6 +8,9 @@ function MotocarroForm({ onOrderCreated }) {
   const [destino, setDestino] = useState("");
   const [comentarios, setComentarios] = useState("");
 
+  // Estado para la lectura GPS
+  const [loadingGps, setLoadingGps] = useState(false);
+
   // 2. Opciones de viaje (por defecto simples)
   const [zona, setZona] = useState("urbana");
   const [oferta, setOferta] = useState(4000);
@@ -30,9 +33,58 @@ function MotocarroForm({ onOrderCreated }) {
     setOferta(zonasTarifas[nuevaZona].base);
   };
 
-  // Ajustar oferta con botones + / -
+  // Ajustar oferta con piso dinámico según la zona activa (Mínimo estricto $4.000)
   const handleAjustarOferta = (monto) => {
-    setOferta((prev) => Math.max(4000, prev + monto));
+    const minPermitido = zonasTarifas[zona]?.base || 4000;
+    setOferta((prev) => Math.max(minPermitido, prev + monto));
+  };
+
+  // Función para capturar ubicación con GPS / Google Maps
+  const obtenerUbicacionGPS = () => {
+    if (!navigator.geolocation) {
+      alert("Tu navegador o dispositivo no soporta geolocalización.");
+      return;
+    }
+
+    setLoadingGps(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const { latitude, longitude } = position.coords;
+
+        try {
+          // Intentamos obtener dirección legible desde OpenStreetMap (Nominatim)
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json`,
+          );
+          const data = await res.json();
+
+          const barrioOCalle =
+            data.address?.road ||
+            data.address?.suburb ||
+            data.address?.neighbourhood;
+
+          if (barrioOCalle) {
+            setOrigen(`📍 Ubicación GPS (${barrioOCalle}, Inírida)`);
+          } else {
+            // Si no da nombre exacto de barrio, guardamos el enlace exacto a Google Maps
+            setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
+          }
+        } catch (error) {
+          // En caso de fallo de red en la geocodificación, dejamos el link directo
+          setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
+        } finally {
+          setLoadingGps(false);
+        }
+      },
+      (error) => {
+        setLoadingGps(false);
+        alert(
+          "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador.",
+        );
+      },
+      { enableHighAccuracy: true, timeout: 10000 },
+    );
   };
 
   const solicitarCarrera = async (e) => {
@@ -61,7 +113,9 @@ function MotocarroForm({ onOrderCreated }) {
       },
       items: [
         {
-          name: `Carrera Motocarro (${zonasTarifas[zona]?.nombre || "Zona General"})`,
+          name: `Carrera Motocarro (${
+            zonasTarifas[zona]?.nombre || "Zona General"
+          })`,
           price: Number(oferta),
           quantity: 1,
         },
@@ -142,12 +196,12 @@ function MotocarroForm({ onOrderCreated }) {
           />
         </div>
 
-        {/* Tarjeta de Ruta Unificada (Estilo App de Transporte) */}
+        {/* Tarjeta de Ruta Unificada con GPS */}
         <div className="bg-gray-50/80 p-3 rounded-2xl border border-gray-200/80 space-y-2 relative">
           {/* Línea conectora visual */}
           <div className="absolute left-[22px] top-[28px] bottom-[28px] w-0.5 bg-gray-300 pointer-events-none" />
 
-          {/* Campo Origen */}
+          {/* Campo Origen + Botón GPS */}
           <div className="flex items-center gap-2 relative z-10">
             <span className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
               A
@@ -157,9 +211,19 @@ function MotocarroForm({ onOrderCreated }) {
               placeholder="¿Dónde te recogen? *"
               value={origen}
               onChange={(e) => setOrigen(e.target.value)}
-              className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800"
+              className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800 truncate"
               required
             />
+            {/* Botón Geolocalización */}
+            <button
+              type="button"
+              onClick={obtenerUbicacionGPS}
+              disabled={loadingGps}
+              className="p-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 cursor-pointer"
+              title="Obtener mi ubicación actual por GPS"
+            >
+              {loadingGps ? "⌛" : "📍 GPS"}
+            </button>
           </div>
 
           {/* Campo Destino */}
@@ -231,7 +295,12 @@ function MotocarroForm({ onOrderCreated }) {
             <button
               type="button"
               onClick={() => handleAjustarOferta(-1000)}
-              className="w-8 h-8 rounded-xl bg-white border border-orange-200 text-orange-600 font-bold text-base flex items-center justify-center hover:bg-orange-100 transition-colors cursor-pointer"
+              disabled={oferta <= (zonasTarifas[zona]?.base || 4000)}
+              className={`w-8 h-8 rounded-xl bg-white border border-orange-200 text-orange-600 font-bold text-base flex items-center justify-center transition-colors ${
+                oferta <= (zonasTarifas[zona]?.base || 4000)
+                  ? "opacity-40 cursor-not-allowed"
+                  : "hover:bg-orange-100 cursor-pointer"
+              }`}
             >
               -
             </button>

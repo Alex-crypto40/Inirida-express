@@ -2,14 +2,18 @@ import { useState, useEffect } from "react";
 import { io } from "socket.io-client";
 import OrderChatModal from "./OrderChatModal";
 
+const API_URL =
+  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+
 export default function OrderStatusWidget({
   activeOrder: initialOrder,
   onCancelOrder,
 }) {
   const [activeOrder, setActiveOrder] = useState(initialOrder);
   const [showChat, setShowChat] = useState(false);
+  const [loadingAction, setLoadingAction] = useState(false);
 
-  // Mantener actualizado el estado local si cambia la prop
+  // Mantener actualizado el estado local si cambia la prop principal
   useEffect(() => {
     setActiveOrder(initialOrder);
   }, [initialOrder]);
@@ -28,7 +32,7 @@ export default function OrderStatusWidget({
     socket.emit("join_order", `order_${activeOrder._id}`);
     socket.emit("join_order", activeOrder._id);
 
-    // Escuchar cuando el conductor acepta la carrera o cambia el estado
+    // Escuchar cuando el conductor acepta, propone o cambia estado
     const handleOrderUpdate = (updatedOrder) => {
       console.log("⚡ Orden actualizada en tiempo real:", updatedOrder);
       if (
@@ -46,18 +50,88 @@ export default function OrderStatusWidget({
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
+    socket.on("counter_offer_received", handleOrderUpdate);
 
     return () => {
       socket.off("orderUpdated", handleOrderUpdate);
       socket.off("order_status_updated", handleOrderUpdate);
       socket.off("order:status_updated", handleOrderUpdate);
+      socket.off("counter_offer_received", handleOrderUpdate);
       socket.disconnect();
     };
   }, [activeOrder?._id]);
 
   if (!activeOrder) return null;
 
-  // Normalizar datos del conductor
+  // Extraer contraoferta pendiente (si existe)
+  const counterOffers = activeOrder.counterOffers || [];
+  const activeCounterOffer =
+    counterOffers.length > 0
+      ? counterOffers[counterOffers.length - 1]
+      : activeOrder.pendingCounterOffer || null;
+
+  // Aceptar la contraoferta enviada por el motocarro
+  const handleAcceptCounterOffer = async () => {
+    if (!activeCounterOffer) return;
+    setLoadingAction(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/orders/${activeOrder._id}/accept-counter`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driverId: activeCounterOffer.driverId,
+            acceptedPrice: activeCounterOffer.proposedPrice,
+          }),
+        },
+      );
+
+      const data = await res.json();
+      if (res.ok) {
+        setActiveOrder(data.order || data);
+      } else {
+        alert(data.message || "No se pudo aceptar la contraoferta.");
+      }
+    } catch (error) {
+      console.error("Error aceptando oferta:", error);
+      alert("Error de conexión al aceptar la propuesta.");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  // Rechazar la contraoferta enviada por el motocarro
+  const handleRejectCounterOffer = async () => {
+    if (!activeCounterOffer) return;
+    setLoadingAction(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/orders/${activeOrder._id}/reject-counter`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driverId: activeCounterOffer.driverId,
+          }),
+        },
+      );
+
+      const data = await res.json();
+      if (res.ok) {
+        setActiveOrder(data.order || data);
+      } else {
+        alert(data.message || "Error al rechazar la oferta.");
+      }
+    } catch (error) {
+      console.error("Error rechazando oferta:", error);
+      alert("Error de conexión al rechazar la propuesta.");
+    } finally {
+      setLoadingAction(false);
+    }
+  };
+
+  // Normalizar datos del conductor asignado
   const driver =
     activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
   const status = activeOrder.status;
@@ -65,8 +139,14 @@ export default function OrderStatusWidget({
   // Normalizar PIN de seguridad
   const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
 
-  // Mapeo preciso con los estados de MongoDB
-  const isPending = status === "pending" || status === "pending_driver";
+  // Mapeo de estados de la orden
+  const hasCounterOffer =
+    Boolean(activeCounterOffer) &&
+    (status === "pending" ||
+      status === "pending_driver" ||
+      status === "counter_offer");
+  const isPending =
+    (status === "pending" || status === "pending_driver") && !hasCounterOffer;
   const isAccepted =
     status === "assigned" ||
     status === "accepted" ||
@@ -78,7 +158,7 @@ export default function OrderStatusWidget({
 
   return (
     <>
-      {/* Tarjeta Flotante del Cliente con zIndex de tarjeta (1040) */}
+      {/* Tarjeta Flotante del Cliente */}
       <div
         className="position-fixed bottom-0 start-50 translate-middle-x mb-3 p-3 bg-white shadow-lg rounded-2xl border border-orange-200"
         style={{
@@ -95,18 +175,60 @@ export default function OrderStatusWidget({
           </h6>
           <span
             className={`badge rounded-pill px-2.5 py-1.5 text-xs font-bold ${
-              isPending
-                ? "bg-warning text-dark animate-pulse"
-                : isAccepted
-                  ? "bg-success text-white"
-                  : "bg-secondary"
+              hasCounterOffer
+                ? "bg-orange-500 text-white animate-bounce"
+                : isPending
+                  ? "bg-warning text-dark animate-pulse"
+                  : isAccepted
+                    ? "bg-success text-white"
+                    : "bg-secondary"
             }`}
           >
+            {hasCounterOffer && "¡Nueva Oferta Recibida!"}
             {isPending && "Buscando motocarro..."}
             {isAccepted && "Conductor en camino"}
             {isCompleted && "Carrera finalizada"}
           </span>
         </div>
+
+        {/* ESTADO 0: NUEVA CONTRAOFERTA RECIBIDA (FLUJO INVERSO) */}
+        {hasCounterOffer && activeCounterOffer && (
+          <div className="my-2 p-3 bg-orange-50 rounded-2xl border-2 border-orange-400 text-center shadow-xs">
+            <p className="text-xs text-orange-900 font-bold mb-1">
+              💬 Un motocarro te propone una tarifa:
+            </p>
+            <div className="d-flex justify-content-center align-items-baseline gap-1 my-1">
+              <span className="text-2xl font-black text-orange-600">
+                ${activeCounterOffer.proposedPrice?.toLocaleString()} COP
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-600 mb-3">
+              Ofrecido por:{" "}
+              <strong>
+                {activeCounterOffer.driverName || "Conductor cercano"}
+              </strong>
+            </p>
+
+            {/* Acciones de Aceptar / Rechazar */}
+            <div className="d-flex gap-2">
+              <button
+                disabled={loadingAction}
+                onClick={handleRejectCounterOffer}
+                className="btn btn-outline-danger btn-sm w-50 rounded-xl font-bold text-xs py-2"
+              >
+                Rechazar ❌
+              </button>
+              <button
+                disabled={loadingAction}
+                onClick={handleAcceptCounterOffer}
+                className="btn btn-success btn-sm w-50 rounded-xl font-bold text-xs py-2 shadow-sm text-white"
+                style={{ backgroundColor: "#16a34a", borderColor: "#15803d" }}
+              >
+                {loadingAction ? "Aceptando..." : "Aceptar Oferta 🤝"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ESTADO 1: BUSCANDO CONDUCTOR */}
         {isPending && (
@@ -168,7 +290,7 @@ export default function OrderStatusWidget({
               </div>
             </div>
 
-            {/* BOTÓN ÚNICO DE CHAT NATURA */}
+            {/* BOTÓN ÚNICO DE CHAT DIRECTO */}
             <div className="pt-1">
               <button
                 className="btn btn-warning text-white btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-2 w-100 py-2 shadow-sm"
@@ -192,7 +314,7 @@ export default function OrderStatusWidget({
         )}
       </div>
 
-      {/* Modal del Chat sobrepuesto de forma independiente */}
+      {/* Modal del Chat sobrepuesto */}
       {showChat && (
         <OrderChatModal
           orderId={activeOrder._id}
