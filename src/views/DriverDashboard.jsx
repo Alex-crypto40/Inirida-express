@@ -22,7 +22,7 @@ export default function DriverDashboard() {
   // Estado para la contraoferta individual de cada orden disponible { [orderId]: monto }
   const [driverOffers, setDriverOffers] = useState({});
 
-  // Maximum increment allowed over the client's offer
+  // Incremento máximo permitido sobre la oferta del cliente
   const MAX_INCREMENT = 3000;
 
   // 1. Cargar pedidos disponibles
@@ -186,24 +186,33 @@ export default function DriverDashboard() {
     }
   };
 
-  // 6. Completar Pedido mediante PIN
+  // 6. Completar Pedido (Sin PIN para Carreras, Con PIN para Mandados/Tiendas)
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
 
-    if (!inputPin.trim()) {
+    const isRide = activeOrder.serviceType === "ride";
+
+    // Si NO es carrera (es paquete/tienda) y no ingresó el PIN, exigirlo
+    if (!isRide && !inputPin.trim()) {
       alert("⚠️ Por favor ingresa el PIN de 4 dígitos del cliente.");
       return;
     }
 
+    setLoading(true);
     try {
+      const payload = {
+        status: "completed",
+        driverId: driver.id,
+      };
+
+      if (!isRide) {
+        payload.pin = inputPin.trim();
+      }
+
       const res = await fetch(`${API_URL}/orders/${activeOrder._id}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: "completed",
-          driverId: driver.id,
-          pin: inputPin.trim(),
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
@@ -211,13 +220,24 @@ export default function DriverDashboard() {
       if (res.ok) {
         setActiveOrder(null);
         setInputPin("");
-        setMessage("¡Entrega verificada y completada con éxito! 💵");
+        setMessage(
+          isRide
+            ? "¡Carrera finalizada con éxito! 💵"
+            : "¡Entrega verificada y completada con éxito! 📦",
+        );
         fetchAvailableOrders();
       } else {
-        alert(data.message || "PIN incorrecto o error al completar el pedido.");
+        alert(
+          data.message ||
+            (isRide
+              ? "Error al finalizar la carrera."
+              : "PIN incorrecto o error al completar el pedido."),
+        );
       }
     } catch (error) {
       alert("Error al conectar con el servidor.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -244,7 +264,7 @@ export default function DriverDashboard() {
         </div>
         <button
           onClick={toggleOnline}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${
+          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer ${
             driver.isOnline
               ? "bg-red-100 text-red-600 hover:bg-red-200"
               : "bg-green-500 text-white hover:bg-green-600 shadow-md"
@@ -260,23 +280,23 @@ export default function DriverDashboard() {
         </div>
       )}
 
-      {/* VISTA DE CARRERA ACTIVA */}
+      {/* VISTA DE CARRERA / PEDIDO ACTIVO */}
       {activeOrder ? (
-        <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-orange-500 mb-6">
-          <div className="flex justify-between items-center mb-3">
+        <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-orange-500 mb-6 space-y-4">
+          <div className="flex justify-between items-center pb-2 border-b border-gray-100">
             <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full uppercase">
               {activeOrder.serviceType === "ride"
                 ? "🛺 Carrera Activa"
                 : "📦 Pedido en Curso"}
             </span>
-            <span className="font-extrabold text-orange-600 text-lg">
+            <span className="font-extrabold text-orange-600 text-xl">
               ${activeOrder.total?.toLocaleString()}
             </span>
           </div>
 
           {/* Badges de Detalles de Carrera */}
           {activeOrder.serviceType === "ride" && activeOrder.rideDetails && (
-            <div className="flex flex-wrap gap-2 mb-4 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
+            <div className="flex flex-wrap gap-2 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
               <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-2xs">
                 👥 {activeOrder.rideDetails.passengersCount || 1} Pasajero(s)
               </span>
@@ -296,20 +316,20 @@ export default function DriverDashboard() {
           {/* 💬 Botón de Chat Directo */}
           <button
             onClick={() => setActiveChatOrder(activeOrder)}
-            className="w-full mb-4 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
+            className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
           >
             <span>💬 Abrir Chat con Cliente / Comercio</span>
-            <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full">
+            <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full font-semibold">
               En Vivo
             </span>
           </button>
 
-          <div className="space-y-3 mb-5 text-sm text-gray-700">
+          <div className="space-y-3 text-sm text-gray-700">
             {/* Información de Recogida / Comercio */}
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
                 {activeOrder.serviceType === "ride"
-                  ? "📍 Punto de Recogida"
+                  ? "📍 Punto A (Recoger en)"
                   : "🏪 Comercio / Tienda"}
               </p>
               <p className="font-bold text-gray-800">
@@ -328,55 +348,64 @@ export default function DriverDashboard() {
             <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
               <p className="text-xs text-gray-400 font-bold uppercase">
                 {activeOrder.serviceType === "ride"
-                  ? "🏁 Pasajero / Destino"
+                  ? "🏁 Punto B (Destino / Pasajero)"
                   : "👤 Cliente / Entrega"}
               </p>
               <p className="font-bold text-gray-800">
                 {activeOrder.customer?.name || "Cliente Inírida Express"}
               </p>
-              {activeOrder.serviceType !== "ride" && (
-                <p className="text-xs text-gray-600">
-                  📍 {activeOrder.customer?.address}
-                </p>
-              )}
-              <p className="text-xs text-gray-600">
+              <p className="text-xs text-gray-600 font-medium mt-0.5">
                 📞 {activeOrder.customer?.phone}
               </p>
               {activeOrder.customer?.notes && (
-                <p className="text-xs italic text-orange-600 mt-1">
-                  Nota: "{activeOrder.customer.notes}"
+                <p className="text-xs italic text-orange-600 mt-1 font-semibold">
+                  "{activeOrder.customer.notes}"
                 </p>
               )}
             </div>
           </div>
 
-          {/* 🔐 Módulo de Confirmación con PIN */}
-          <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
-            <label className="block text-xs font-bold text-gray-700 text-center">
-              🔐 Ingresa el PIN de 4 dígitos del cliente para finalizar:
-            </label>
-            <input
-              type="text"
-              maxLength="4"
-              placeholder="Ej: 4321"
-              value={inputPin}
-              onChange={(e) => setInputPin(e.target.value)}
-              className="w-full text-center tracking-widest text-xl font-extrabold border border-gray-300 rounded-xl py-2 focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
-            />
+          {/* MÓDULO DE FINALIZACIÓN SEGÚN TIPO DE SERVICIO */}
+          {activeOrder.serviceType === "ride" ? (
+            /* 🛺 FINALIZAR CARRERA DIRECTA (SIN PIN) */
             <button
               onClick={handleCompleteOrder}
-              className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
+              disabled={loading}
+              className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-base shadow-md transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
             >
-              💵 Verificar PIN y Completar Carrera
+              <span>{loading ? "Finalizando..." : "Finalizar Carrera"}</span>
+              <span>🏁</span>
             </button>
-          </div>
+          ) : (
+            /* 📦 FINALIZAR CON PIN (MANDADOS / TIENDAS) */
+            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
+              <label className="block text-xs font-bold text-gray-700 text-center">
+                🔐 Ingresa el PIN de 4 dígitos del cliente para entregar:
+              </label>
+              <input
+                type="text"
+                maxLength="4"
+                placeholder="Ej: 4321"
+                value={inputPin}
+                onChange={(e) => setInputPin(e.target.value)}
+                className="w-full text-center tracking-widest text-xl font-extrabold border border-gray-300 rounded-xl py-2 focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+              />
+              <button
+                onClick={handleCompleteOrder}
+                disabled={loading}
+                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
+              >
+                💵 Verificar PIN y Entregar Pedido
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         /* VISTA DE CARRERAS DISPONIBLES */
         <div>
           <h3 className="font-bold text-gray-800 mb-3 flex justify-between items-center text-sm">
             <span>Solicitudes Disponibles</span>
-            <span className="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full">
+            <span className="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-bold">
               {availableOrders.length}
             </span>
           </h3>
@@ -391,7 +420,7 @@ export default function DriverDashboard() {
           ) : availableOrders.length === 0 ? (
             <div className="bg-white rounded-2xl p-8 text-center text-gray-400 border border-gray-100">
               <p className="text-3xl mb-2">⏳</p>
-              <p className="text-xs">
+              <p className="text-xs font-medium">
                 Buscando nuevas solicitudes en tiempo real...
               </p>
             </div>
@@ -406,9 +435,9 @@ export default function DriverDashboard() {
                 return (
                   <div
                     key={order._id}
-                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between"
+                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between space-y-3"
                   >
-                    <div className="flex justify-between items-start mb-2">
+                    <div className="flex justify-between items-start">
                       <div>
                         <span
                           className={`inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase mb-1 ${
@@ -426,7 +455,7 @@ export default function DriverDashboard() {
                               }`
                             : order.store?.name || "Pedido de Comercio"}
                         </h4>
-                        <p className="text-xs text-gray-500">
+                        <p className="text-xs text-gray-500 font-medium">
                           {isRide
                             ? `${order.customer?.notes || ""}`
                             : `📍 Entregar en: ${order.customer?.address}`}
@@ -442,11 +471,11 @@ export default function DriverDashboard() {
                       </div>
                     </div>
 
-                    {/* Mostrar Badges visuales */}
+                    {/* Mostrar Badges visuales de la Carrera */}
                     {order.rideDetails && (
-                      <div className="flex flex-wrap gap-1.5 my-2">
+                      <div className="flex flex-wrap gap-1.5 my-1">
                         <span className="bg-gray-100 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                          👥 {order.rideDetails.passengersCount || 1} Pza
+                          👥 {order.rideDetails.passengersCount || 1} Pas.
                         </span>
                         {order.rideDetails.hasLuggage && (
                           <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
@@ -461,9 +490,9 @@ export default function DriverDashboard() {
                       </div>
                     )}
 
-                    {/* CONTROLES DE TARIFA E INVERSO (SOLO PARA MOTOCARROS) */}
+                    {/* CONTROLES DE TARIFA Y CONTRAOFERTA (SOLO PARA MOTOCARROS) */}
                     {isRide && (
-                      <div className="mt-2 pt-2 border-t border-gray-100 bg-orange-50/50 p-2.5 rounded-xl space-y-2">
+                      <div className="pt-2 border-t border-gray-100 bg-orange-50/50 p-2.5 rounded-xl space-y-2">
                         <div className="flex justify-between items-center">
                           <span className="text-xs font-bold text-orange-900">
                             Tu Propuesta:
@@ -548,7 +577,7 @@ export default function DriverDashboard() {
 
                     {/* BANDERAS DE TIENDAS / PEDIDOS REGULARES */}
                     {!isRide && (
-                      <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-50">
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-100">
                         <span className="text-xs text-gray-400">
                           Total Pedido:{" "}
                           <strong className="text-gray-700">

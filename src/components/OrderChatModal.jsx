@@ -17,9 +17,18 @@ const OrderChatModal = ({
   const socketRef = useRef(null);
   const chatBottomRef = useRef(null);
 
-  // Normalizar el rol del usuario (prioridad currentUserRole, luego userType, por defecto "client")
-  const role = currentUserRole || userType || "client";
-  const name = currentUserName || (role === "client" ? "Cliente" : role === "driver" ? "Conductor" : "Comercio");
+  // Normalización estricta de roles ("customer" -> "client")
+  let rawRole = currentUserRole || userType || "client";
+  if (rawRole === "customer") rawRole = "client";
+  const role = rawRole;
+
+  const name =
+    currentUserName ||
+    (role === "client"
+      ? "Cliente"
+      : role === "driver"
+        ? "Conductor"
+        : "Comercio");
 
   useEffect(() => {
     if (!orderId) return;
@@ -27,7 +36,9 @@ const OrderChatModal = ({
     // 1. Cargar historial de mensajes previo desde el backend
     const fetchHistory = async () => {
       try {
-        const response = await fetch(`${BASE_URL}/api/orders/${orderId}/messages`);
+        const response = await fetch(
+          `${BASE_URL}/api/orders/${orderId}/messages`,
+        );
         if (response.ok) {
           const data = await response.json();
           setMessages(data);
@@ -45,10 +56,26 @@ const OrderChatModal = ({
     // Unirse a la sala única de esta orden
     socketRef.current.emit("join_order_chat", orderId);
     socketRef.current.emit("join_order", `order_${orderId}`); // Compatibilidad cruzada
+    socketRef.current.emit("join_order", orderId);
 
-    // Escuchar mensajes en tiempo real
+    // Escuchar mensajes en tiempo real previniendo duplicados
     const handleReceiveMessage = (newMessage) => {
-      setMessages((prev) => [...prev, newMessage]);
+      setMessages((prev) => {
+        // Si el mensaje ya existe en el estado local por ID o coincidencia exacta, no se duplica
+        const isDuplicate = prev.some(
+          (m) =>
+            (m._id && m._id === newMessage._id) ||
+            (m.text === newMessage.text &&
+              m.senderRole === newMessage.senderRole &&
+              Math.abs(
+                new Date(m.createdAt || Date.now()) -
+                  new Date(newMessage.createdAt || Date.now()),
+              ) < 1000),
+        );
+
+        if (isDuplicate) return prev;
+        return [...prev, newMessage];
+      });
     };
 
     socketRef.current.on("receive_message", handleReceiveMessage);
@@ -78,12 +105,14 @@ const OrderChatModal = ({
       senderRole: role, // "driver" | "client" | "store"
       senderName: name,
       text: text.trim(),
+      createdAt: new Date().toISOString(),
     };
 
     // Emitir mensaje por WebSockets
     if (socketRef.current) {
       socketRef.current.emit("send_message", messageData);
     }
+
     setText("");
   };
 
@@ -95,6 +124,7 @@ const OrderChatModal = ({
       case "driver":
         return { label: "Motocarro 🛺", bg: "bg-blue-100 text-blue-800" };
       case "client":
+      case "customer":
         return { label: "Cliente 👤", bg: "bg-green-100 text-green-800" };
       default:
         return { label: "Usuario", bg: "bg-gray-100 text-gray-800" };
@@ -104,7 +134,7 @@ const OrderChatModal = ({
   return (
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-      style={{ zIndex: 1060 }} // Garantiza estar sobre la tarjeta flotante (z-1040/1050)
+      style={{ zIndex: 1060 }} // Capa z-index garantizada sobre la tarjeta flotante
     >
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100">
         {/* Encabezado del Chat */}
@@ -137,13 +167,17 @@ const OrderChatModal = ({
             </div>
           ) : (
             messages.map((msg, index) => {
-              const isMe = msg.senderRole === role;
+              const isMe =
+                msg.senderRole === role ||
+                (role === "client" && msg.senderRole === "customer");
               const badge = getRoleBadge(msg.senderRole);
 
               return (
                 <div
                   key={msg._id || index}
-                  className={`flex flex-col ${isMe ? "items-end" : "items-start"}`}
+                  className={`flex flex-col ${
+                    isMe ? "items-end" : "items-start"
+                  }`}
                 >
                   <div className="flex items-center gap-1 mb-1">
                     <span className="text-[10px] font-bold text-gray-600">

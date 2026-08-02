@@ -68,7 +68,7 @@ export default function OrderStatusWidget({
   const activeCounterOffer =
     counterOffers.length > 0
       ? counterOffers[counterOffers.length - 1]
-      : activeOrder.pendingCounterOffer || null;
+      : activeOrder.pendingCounterOffer || activeOrder.counterOffer || null;
 
   // Aceptar la contraoferta enviada por el motocarro
   const handleAcceptCounterOffer = async () => {
@@ -139,14 +139,17 @@ export default function OrderStatusWidget({
   // Normalizar PIN de seguridad
   const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
 
-  // Mapeo de estados de la orden
+  // Mapeo de estados de la orden (se incluye 'counter_offered')
   const hasCounterOffer =
     Boolean(activeCounterOffer) &&
     (status === "pending" ||
       status === "pending_driver" ||
-      status === "counter_offer");
+      status === "counter_offer" ||
+      status === "counter_offered");
+
   const isPending =
     (status === "pending" || status === "pending_driver") && !hasCounterOffer;
+
   const isAccepted =
     status === "assigned" ||
     status === "accepted" ||
@@ -154,7 +157,17 @@ export default function OrderStatusWidget({
     status === "on_the_way" ||
     status === "at_store" ||
     status === "in_progress";
+
   const isCompleted = status === "completed";
+
+  // Identificadores para el modal del chat
+  const customerId =
+    activeOrder.customer?._id ||
+    activeOrder.customer?.id ||
+    activeOrder.customerId ||
+    "cliente";
+  const customerName =
+    activeOrder.customer?.name || activeOrder.customerName || "Cliente";
 
   return (
     <>
@@ -191,7 +204,7 @@ export default function OrderStatusWidget({
           </span>
         </div>
 
-        {/* ESTADO 0: NUEVA CONTRAOFERTA RECIBIDA (FLUJO INVERSO) */}
+        {/* ESTADO 0: NUEVA CONTRAOFERTA RECIBIDA */}
         {hasCounterOffer && activeCounterOffer && (
           <div className="my-2 p-3 bg-orange-50 rounded-2xl border-2 border-orange-400 text-center shadow-xs">
             <p className="text-xs text-orange-900 font-bold mb-1">
@@ -253,8 +266,8 @@ export default function OrderStatusWidget({
         {/* ESTADO 2: CONDUCTOR EN CAMINO */}
         {isAccepted && (
           <div className="space-y-2 mt-2">
-            {/* PIN DE SEGURIDAD */}
-            {pinCode && (
+            {/* PIN DE SEGURIDAD (Opcional según tipo de servicio) */}
+            {pinCode && activeOrder.serviceType !== "ride" && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-2 text-center">
                 <span className="text-[10px] text-orange-800 font-bold uppercase tracking-wider block">
                   Tu PIN de Seguridad
@@ -263,7 +276,7 @@ export default function OrderStatusWidget({
                   {pinCode}
                 </span>
                 <p className="text-[10px] text-orange-700/80 m-0">
-                  Entrégale este código al conductor al subirte
+                  Entrégale este código al repartidor al recibir
                 </p>
               </div>
             )}
@@ -293,7 +306,7 @@ export default function OrderStatusWidget({
             {/* BOTÓN ÚNICO DE CHAT DIRECTO */}
             <div className="pt-1">
               <button
-                className="btn btn-warning text-white btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-2 w-100 py-2 shadow-sm"
+                className="btn btn-warning text-white btn-sm font-bold text-xs rounded-xl d-flex align-items-center justify-content-center gap-2 w-100 py-2 shadow-sm cursor-pointer"
                 style={{ backgroundColor: "#f97316", borderColor: "#ea580c" }}
                 onClick={() => setShowChat(true)}
               >
@@ -318,7 +331,9 @@ export default function OrderStatusWidget({
       {showChat && (
         <OrderChatModal
           orderId={activeOrder._id}
-          currentUserRole="client"
+          currentUserRole="customer"
+          currentUserId={customerId}
+          currentUserName={customerName}
           onClose={() => setShowChat(false)}
         />
       )}
