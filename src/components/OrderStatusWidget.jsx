@@ -8,17 +8,69 @@ const API_URL =
 export default function OrderStatusWidget({
   activeOrder: initialOrder,
   onCancelOrder,
+  customerIdProp, // Opcional: Para consultar si viene desde props
 }) {
   const [activeOrder, setActiveOrder] = useState(initialOrder);
   const [showChat, setShowChat] = useState(false);
   const [loadingAction, setLoadingAction] = useState(false);
 
-  // Mantener actualizado el estado local si cambia la prop principal
+  // 1. Guardar en localStorage cada vez que la orden cambie
   useEffect(() => {
-    setActiveOrder(initialOrder);
+    if (initialOrder) {
+      setActiveOrder(initialOrder);
+      localStorage.setItem("activeOrderId", initialOrder._id);
+    }
   }, [initialOrder]);
 
-  // Escuchar actualizaciones por WebSockets en tiempo real
+  // 2. AUTO-RECUPERACIÓN: Si no hay initialOrder (ej. recarga de página), buscar orden activa
+  useEffect(() => {
+    if (activeOrder) return; // Si ya hay una orden cargada, no hacer nada
+
+    const recoverActiveOrder = async () => {
+      const storedOrderId = localStorage.getItem("activeOrderId");
+
+      // Determinar ID del cliente desde la orden o props
+      const targetCustomerId =
+        customerIdProp || localStorage.getItem("userId") || "cliente";
+
+      try {
+        let res;
+        // Estrategia A: Si tenemos un ID guardado en localStorage
+        if (storedOrderId) {
+          res = await fetch(`${API_URL}/orders/${storedOrderId}`);
+        } else if (targetCustomerId && targetCustomerId !== "cliente") {
+          // Estrategia B: Consultar por la orden activa del cliente en el backend
+          res = await fetch(
+            `${API_URL}/orders/active?customerId=${targetCustomerId}`,
+          );
+        }
+
+        if (res && res.ok) {
+          const data = await res.json();
+          const foundOrder = data.order || data.activeOrder || data;
+
+          // Si la orden devuelta aún no está finalizada ni cancelada, se recupera
+          if (
+            foundOrder &&
+            foundOrder._id &&
+            foundOrder.status !== "completed" &&
+            foundOrder.status !== "cancelled"
+          ) {
+            setActiveOrder(foundOrder);
+            localStorage.setItem("activeOrderId", foundOrder._id);
+          } else {
+            localStorage.removeItem("activeOrderId");
+          }
+        }
+      } catch (error) {
+        console.error("Error intentando recuperar la orden activa:", error);
+      }
+    };
+
+    recoverActiveOrder();
+  }, [activeOrder, customerIdProp]);
+
+  // 3. Escuchar actualizaciones por WebSockets en tiempo real
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
@@ -26,21 +78,31 @@ export default function OrderStatusWidget({
     const SOCKET_URL = API_URL.replace(/\/api\/?$/, "");
     const socket = io(SOCKET_URL);
 
-    // Unirse a la sala única del pedido
     socket.emit("join_order", `order_${orderId}`);
     socket.emit("join_order", orderId);
 
-    // Escuchar cuando el conductor acepta, propone o cambia estado
     const handleOrderUpdate = (updatedOrder) => {
       console.log("⚡ Orden actualizada en tiempo real:", updatedOrder);
       if (
         updatedOrder &&
         (updatedOrder._id === orderId || updatedOrder.orderId === orderId)
       ) {
-        setActiveOrder((prev) => ({
-          ...prev,
-          ...(typeof updatedOrder === "object" ? updatedOrder : {}),
-        }));
+        setActiveOrder((prev) => {
+          const nextState = {
+            ...prev,
+            ...(typeof updatedOrder === "object" ? updatedOrder : {}),
+          };
+
+          // Si el estado pasa a finalizado o cancelado, limpiar localStorage
+          if (
+            nextState.status === "completed" ||
+            nextState.status === "cancelled"
+          ) {
+            localStorage.removeItem("activeOrderId");
+          }
+
+          return nextState;
+        });
       }
     };
 
@@ -63,7 +125,7 @@ export default function OrderStatusWidget({
   // Función para cancelar la carrera activada desde el botón
   const handleCancelOrder = async () => {
     const confirmCancel = window.confirm(
-      "¿Estás seguro de que deseas cancelar la solicitud de motocarro?"
+      "¿Estás seguro de que deseas cancelar la solicitud de motocarro?",
     );
     if (!confirmCancel) return;
 
@@ -77,10 +139,11 @@ export default function OrderStatusWidget({
 
       const data = await res.json();
       if (res.ok) {
+        localStorage.removeItem("activeOrderId"); // Limpiar almacenamiento al cancelar
         if (onCancelOrder) {
           onCancelOrder(activeOrder._id);
         }
-        setActiveOrder(null); // Oculta la tarjeta inmediatamente
+        setActiveOrder(null);
       } else {
         alert(data.message || "No se pudo cancelar la carrera.");
       }
@@ -113,7 +176,7 @@ export default function OrderStatusWidget({
             driverId: activeCounterOffer.driverId,
             acceptedPrice: activeCounterOffer.proposedPrice,
           }),
-        }
+        },
       );
 
       const data = await res.json();
@@ -143,7 +206,7 @@ export default function OrderStatusWidget({
           body: JSON.stringify({
             driverId: activeCounterOffer.driverId,
           }),
-        }
+        },
       );
 
       const data = await res.json();
@@ -220,10 +283,10 @@ export default function OrderStatusWidget({
               hasCounterOffer
                 ? "bg-orange-500 text-white animate-bounce"
                 : isPending
-                ? "bg-warning text-dark animate-pulse"
-                : isAccepted
-                ? "bg-success text-white"
-                : "bg-secondary"
+                  ? "bg-warning text-dark animate-pulse"
+                  : isAccepted
+                    ? "bg-success text-white"
+                    : "bg-secondary"
             }`}
           >
             {hasCounterOffer && "¡Nueva Oferta Recibida!"}
@@ -251,7 +314,6 @@ export default function OrderStatusWidget({
               </strong>
             </p>
 
-            {/* Acciones de Aceptar / Rechazar */}
             <div className="d-flex gap-2">
               <button
                 disabled={loadingAction}
@@ -285,7 +347,6 @@ export default function OrderStatusWidget({
               </p>
             </div>
 
-            {/* BOTÓN CANCELAR CON ESTILOS DESTACADOS Y FEEDBACK */}
             <button
               disabled={loadingAction}
               onClick={handleCancelOrder}
@@ -306,7 +367,6 @@ export default function OrderStatusWidget({
         {/* ESTADO 2: CONDUCTOR EN CAMINO */}
         {isAccepted && (
           <div className="space-y-2 mt-2">
-            {/* PIN DE SEGURIDAD */}
             {pinCode && activeOrder.serviceType !== "ride" && (
               <div className="bg-orange-50 border border-orange-200 rounded-xl p-2 text-center">
                 <span className="text-[10px] text-orange-800 font-bold uppercase tracking-wider block">
@@ -321,7 +381,6 @@ export default function OrderStatusWidget({
               </div>
             )}
 
-            {/* Datos del Conductor y Vehículo */}
             <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 text-xs space-y-1">
               <div className="d-flex justify-content-between">
                 <span className="text-gray-500 font-medium">Conductor:</span>
@@ -343,7 +402,6 @@ export default function OrderStatusWidget({
               </div>
             </div>
 
-            {/* BOTÓN ÚNICO DE CHAT DIRECTO */}
             <div className="pt-1">
               <button
                 type="button"
@@ -368,7 +426,6 @@ export default function OrderStatusWidget({
         )}
       </div>
 
-      {/* Modal del Chat sobrepuesto */}
       {showChat && (
         <OrderChatModal
           orderId={activeOrder._id}
