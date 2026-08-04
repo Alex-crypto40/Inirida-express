@@ -306,3 +306,22 @@ export const getActiveDriverOrder = async (req, res) => {
     res.status(500).json({ message: "Error al consultar la carrera activa." });
   }
 };
+// 9. Obtener los detalles / estado de un pedido por ID
+export const getOrderById = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId)
+      .populate("store", "name address phone")
+      .populate("driver", "name phone vehicleType plateNumber");
+
+    if (!order) {
+      return res.status(404).json({ message: "Solicitud no encontrada." });
+    }
+
+    res.json(order);
+  } catch (error) {
+    console.error("Error al obtener la orden por ID:", error);
+    res.status(500).json({ message: "Error interno al consultar la orden." });
+  }
+};

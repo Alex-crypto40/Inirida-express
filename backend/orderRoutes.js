@@ -3,6 +3,7 @@ import {
   createOrder,
   getAvailableOrders,
   getActiveDriverOrder,
+  getOrderById,
   getOrderMessages,
   takeOrder,
   sendCounterOffer,
@@ -28,6 +29,8 @@ router.get("/driver/:driverId/active", getActiveDriverOrder);
 /* ==========================================================================
    2. Rutas Parametrizadas por Pedido (/:orderId/...)
    ========================================================================== */
+// Obtener un pedido por ID (Mantiene actualizado el frontend/polling)
+router.get("/:orderId", getOrderById); // 👈 Agregar esta línea
 
 // Obtener el historial de mensajes de un pedido
 router.get("/:orderId/messages", getOrderMessages);
