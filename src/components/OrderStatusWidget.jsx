@@ -2,8 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import { io } from "socket.io-client";
 import OrderChatModal from "./OrderChatModal";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+const RAW_URL =
+  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+const API_URL = `${RAW_URL.replace(/\/api\/?$/, "")}/api`;
 
 export default function OrderStatusWidget({
   activeOrder: initialOrder,
