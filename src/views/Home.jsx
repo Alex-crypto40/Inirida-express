@@ -35,7 +35,7 @@ function Home() {
       if (!savedOrderId) return;
 
       try {
-        const res = await fetch(`${API_URL}/api/orders/${savedOrderId}`);
+        const res = await fetch(`${API_URL}/orders/${savedOrderId}`);
         if (res.ok) {
           const order = await res.json();
           if (order.status === "completed" || order.status === "cancelled") {
@@ -69,7 +69,7 @@ function Home() {
 
     const checkOrderStatus = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/orders/${activeOrder._id}`);
+        const res = await fetch(`${API_URL}/orders/${activeOrder._id}`);
         if (res.ok) {
           const updatedOrder = await res.json();
           setActiveOrder(updatedOrder);
@@ -94,7 +94,7 @@ function Home() {
   // Cancelar carrera desde la tarjeta flotante
   const handleCancelOrder = async (orderId) => {
     try {
-      const res = await fetch(`${API_URL}/api/orders/${orderId}/cancel`, {
+      const res = await fetch(`${API_URL}/orders/${orderId}/cancel`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
       });

@@ -36,9 +36,7 @@ const OrderChatModal = ({
     // 1. Cargar historial de mensajes previo desde el backend
     const fetchHistory = async () => {
       try {
-        const response = await fetch(
-          `${BASE_URL}/api/orders/${orderId}/messages`,
-        );
+        const response = await fetch(`${BASE_URL}/orders/${orderId}/messages`);
         if (response.ok) {
           const data = await response.json();
           setMessages(data);

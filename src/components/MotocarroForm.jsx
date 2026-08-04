@@ -147,7 +147,7 @@ function MotocarroForm({ onOrderCreated }) {
       const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
       const API_BASE = RAW_API.replace(/\/api\/?$/, "");
 
-      const res = await fetch(`${API_BASE}/api/orders`, {
+      const res = await fetch(`${API_BASE}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pedidoMotocarro),

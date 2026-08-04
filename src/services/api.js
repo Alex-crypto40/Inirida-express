@@ -1,6 +1,7 @@
 // Usa la variable de entorno en producción (Render) o la URL por defecto
-const API_URL =
-  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+const RAW_URL =
+  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+const API_URL = `${RAW_URL.replace(/\/api\/?$/, "")}/api`;
 
 // --- TIENDAS Y PRODUCTOS ---
 
