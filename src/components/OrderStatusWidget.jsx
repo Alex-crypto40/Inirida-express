@@ -41,6 +41,17 @@ export default function OrderStatusWidget({
       const targetCustomerId =
         customerIdProp || localStorage.getItem("userId") || "cliente";
 
+      // 🛑 VALIDACIÓN BLINDADA: Evita hacer fetch con valores inválidos o "undefined"
+      if (
+        !storedOrderId ||
+        storedOrderId === "undefined" ||
+        storedOrderId === "null" ||
+        storedOrderId.trim() === ""
+      ) {
+        localStorage.removeItem("activeOrderId");
+        return;
+      }
+
       try {
         let res;
         if (storedOrderId) {
@@ -66,6 +77,8 @@ export default function OrderStatusWidget({
           } else {
             localStorage.removeItem("activeOrderId");
           }
+        } else {
+          localStorage.removeItem("activeOrderId");
         }
       } catch (error) {
         console.error("Error al recuperar orden:", error);
