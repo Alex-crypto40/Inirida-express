@@ -41,7 +41,7 @@ const corsOptions = {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
-      callback(null, true); // Opcional: permitir otros orígenes dinámicamente si es necesario
+      callback(null, true);
     }
   },
   credentials: true,
@@ -64,7 +64,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true,
   },
 });
@@ -76,10 +76,11 @@ app.set("io", io);
 io.on("connection", (socket) => {
   console.log(`⚡ Usuario conectado al WebSocket: ${socket.id}`);
 
-  // Unirse a la sala única del pedido (sirve tanto para Chat como para cambios de estado)
+  // Unirse a la sala única del pedido
   socket.on("join_order_chat", (orderId) => {
+    if (!orderId) return;
     socket.join(orderId);
-    socket.join(`order_${orderId}`); // Soporte para la nomenclatura de eventos de orden
+    socket.join(`order_${orderId}`);
     console.log(
       `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
     );
@@ -87,6 +88,7 @@ io.on("connection", (socket) => {
 
   // Salir de la sala del pedido
   socket.on("leave_order_chat", (orderId) => {
+    if (!orderId) return;
     socket.leave(orderId);
     socket.leave(`order_${orderId}`);
     console.log(
@@ -110,8 +112,8 @@ io.on("connection", (socket) => {
       });
       await newMessage.save();
 
-      // Emitir el mensaje a TODOS los participantes de ese pedido
-      io.to(orderId).emit("receive_message", newMessage);
+      // Emitir a ambas variantes de la sala para garantizar que cliente y repartidor reciban
+      io.to(orderId).to(`order_${orderId}`).emit("receive_message", newMessage);
     } catch (error) {
       console.error("Error al guardar/transmitir mensaje en WebSocket:", error);
     }
