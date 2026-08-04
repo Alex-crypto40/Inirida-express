@@ -5,7 +5,7 @@ import StoreCard from "../components/StoreCard";
 import MotocarroForm from "../components/MotocarroForm";
 import OrderStatusWidget from "../components/OrderStatusWidget";
 
-function Home() {
+function Home({ socket }) {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -13,18 +13,19 @@ function Home() {
   const [categoriaSeleccionada, setCategoriaSeleccionada] =
     useState("restaurante");
 
-  // Estado para controlar la solicitud de motocarro activa
+  // Estado para controlar la solicitud de motocarro / pedido activa
   const [activeOrder, setActiveOrder] = useState(null);
 
   const navigate = useNavigate();
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const API_URL =
+    import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
 
   const categoriasGlobales = [
+    { id: "motocarro", label: "Motocarro", icon: "🛺" },
     { id: "turismo", label: "Turismo", icon: "🌴" },
     { id: "restaurante", label: "Restaurantes", icon: "🍔" },
     { id: "licorera", label: "Licoreras", icon: "🍺" },
     { id: "hotel", label: "Hoteles", icon: "🏨" },
-    { id: "motocarro", label: "Motocarro", icon: "🛺" },
     { id: "mandados", label: "Mandados", icon: "🛵" },
   ];
 
@@ -63,10 +64,36 @@ function Home() {
     }
   };
 
-  // 3. CONSULTA PERIÓDICA DEL ESTADO DE LA CARRERA ACTIVA
+  // 3. LISTENERS WEBSOCKET & POLLING DE RESPALDO PARA ORDEN ACTIVA
   useEffect(() => {
     if (!activeOrder?._id) return;
 
+    // Conexión por WebSockets para actualizaciones en tiempo real
+    if (socket) {
+      socket.emit("join_order", activeOrder._id);
+
+      const handleOrderUpdate = (updatedOrder) => {
+        if (updatedOrder._id === activeOrder._id) {
+          setActiveOrder(updatedOrder);
+
+          if (
+            updatedOrder.status === "completed" ||
+            updatedOrder.status === "cancelled"
+          ) {
+            localStorage.removeItem("activeOrderId");
+            setTimeout(() => setActiveOrder(null), 5000);
+          }
+        }
+      };
+
+      socket.on("order_updated", handleOrderUpdate);
+
+      return () => {
+        socket.off("order_updated", handleOrderUpdate);
+      };
+    }
+
+    // Polling de respaldo cada 4 segundos por si se interrumpe la conexión Socket
     const checkOrderStatus = async () => {
       try {
         const res = await fetch(`${API_URL}/orders/${activeOrder._id}`);
@@ -83,13 +110,13 @@ function Home() {
           }
         }
       } catch (error) {
-        console.error("Error al actualizar el estado de la orden:", error);
+        console.error("Error al actualizar estado de la orden:", error);
       }
     };
 
-    const interval = setInterval(checkOrderStatus, 3000);
+    const interval = setInterval(checkOrderStatus, 4000);
     return () => clearInterval(interval);
-  }, [activeOrder?._id, API_URL]);
+  }, [activeOrder?._id, API_URL, socket]);
 
   // Cancelar carrera desde la tarjeta flotante
   const handleCancelOrder = async (orderId) => {
@@ -109,6 +136,7 @@ function Home() {
     }
   };
 
+  // 4. CARGA DE COMERCIOS SEGÚN CATEGORÍA
   useEffect(() => {
     setLoading(true);
     getStores(categoriaSeleccionada)
@@ -157,7 +185,7 @@ function Home() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button className="bg-white/20 hover:bg-white/30 backdrop-blur-md p-2 rounded-xl text-sm transition-all active:scale-95">
+          <button className="bg-white/20 hover:bg-white/30 backdrop-blur-md p-2 rounded-xl text-sm transition-all active:scale-95 cursor-pointer">
             🛒
           </button>
 
@@ -170,7 +198,7 @@ function Home() {
         </div>
       </header>
 
-      {/* 2. MENÚ LATERAL MEJORADO (DRAWER PREMIUM) */}
+      {/* 2. MENÚ LATERAL (DRAWER) */}
       {menuAbierto && (
         <div
           onClick={() => setMenuAbierto(false)}
@@ -184,13 +212,11 @@ function Home() {
         }`}
       >
         <div className="flex flex-col h-full justify-between">
-          {/* PARTE SUPERIOR */}
           <div>
-            {/* Header del Menú */}
             <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-5 text-white relative rounded-b-3xl shadow-md">
               <button
                 onClick={() => setMenuAbierto(false)}
-                className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold transition-all"
+                className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold transition-all cursor-pointer"
               >
                 ✕
               </button>
@@ -209,9 +235,7 @@ function Home() {
               </div>
             </div>
 
-            {/* Opciones */}
             <nav className="p-5 space-y-3 bg-gray-50">
-              {/* INICIO */}
               <button
                 onClick={() => setMenuAbierto(false)}
                 className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
@@ -232,7 +256,6 @@ function Home() {
                 <span className="text-gray-400 text-lg">›</span>
               </button>
 
-              {/* VENDER */}
               <button
                 onClick={irAFormularioComercio}
                 className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
@@ -253,7 +276,6 @@ function Home() {
                 <span className="text-orange-500 font-bold text-lg">›</span>
               </button>
 
-              {/* REPARTIDOR */}
               <button
                 onClick={irAFormularioRepartidor}
                 className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
@@ -276,7 +298,6 @@ function Home() {
             </nav>
           </div>
 
-          {/* FOOTER */}
           <div className="p-5 border-t border-gray-100 bg-white space-y-3">
             <button
               onClick={cerrarSesion}
@@ -292,9 +313,8 @@ function Home() {
         </div>
       </aside>
 
-      {/* CUERPO PRINCIPAL */}
+      {/* 3. CUERPO PRINCIPAL */}
       <div className="p-4 flex flex-col gap-4 flex-1 pb-24">
-        {/* BUSCADOR */}
         <div className="relative">
           <input
             type="text"
@@ -329,7 +349,7 @@ function Home() {
           </div>
         </div>
 
-        {/* TARJETAS / VISTA PRINCIPAL */}
+        {/* CONTENIDO PRINCIPAL */}
         <div className="flex-1 mt-1">
           <h2 className="text-sm font-extrabold text-gray-800 mb-3 flex justify-between items-center">
             <span className="capitalize">
@@ -352,7 +372,6 @@ function Home() {
             </span>
           </h2>
 
-          {/* EVALUACIÓN DE VISTA Y RENDERIZADO */}
           {categoriaSeleccionada === "motocarro" ? (
             <MotocarroForm onOrderCreated={handleOrderCreated} />
           ) : loading ? (
@@ -393,10 +412,11 @@ function Home() {
         </div>
       </div>
 
-      {/* TARJETA FLOTANTE DE SEGUIMIENTO PARA EL CLIENTE */}
+      {/* TARJETA FLOTANTE DE SEGUIMIENTO CON SOCKETS Y MAPA */}
       <OrderStatusWidget
         activeOrder={activeOrder}
         onCancelOrder={handleCancelOrder}
+        socket={socket}
       />
     </div>
   );

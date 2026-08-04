@@ -30,14 +30,12 @@ const allowedOrigins = [
   "http://localhost:3000",
 ];
 
-// Si tienes una variable CLIENT_URL en Render, la incluimos también
 if (process.env.CLIENT_URL) {
   allowedOrigins.push(process.env.CLIENT_URL);
 }
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permite peticiones sin origen (como Postman o llamadas internas) o si está en la lista permitida
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
@@ -69,12 +67,48 @@ const io = new Server(server, {
   },
 });
 
-// 🔑 CLAVE: Inyectamos 'io' en Express para usarlo desde req.app.get("io") en orderController.js
+// 🔑 Inyectamos 'io' en Express
 app.set("io", io);
+
+// 📍 Memoria en servidor para mantener la última ubicación de los conductores activos
+const activeDriversLocations = new Map();
 
 // 🔌 5. Lógica de comunicación en tiempo real
 io.on("connection", (socket) => {
   console.log(`⚡ Usuario conectado al WebSocket: ${socket.id}`);
+
+  // Transmitir ubicaciones activas al cliente recién conectado
+  socket.emit(
+    "initial_drivers_locations",
+    Array.from(activeDriversLocations.values()),
+  );
+
+  // 🛰️ Evento: Actualización de posición GPS del conductor
+  socket.on("update_driver_location", (data) => {
+    const { driverId, driverName, lat, lng, isAvailable } = data;
+
+    if (!driverId || lat === undefined || lng === undefined) return;
+
+    if (isAvailable) {
+      const driverInfo = {
+        driverId,
+        driverName,
+        lat,
+        lng,
+        socketId: socket.id,
+        updatedAt: new Date(),
+      };
+
+      activeDriversLocations.set(driverId, driverInfo);
+
+      // Difundir la posición a todos los clientes conectados en la vista del mapa
+      io.emit("driver_location_changed", driverInfo);
+    } else {
+      // Si el conductor se deshabilita o entra en carrera ocupada, se remueve del mapa público
+      activeDriversLocations.delete(driverId);
+      io.emit("driver_disconnected_location", { driverId });
+    }
+  });
 
   // Unirse a la sala única del pedido
   socket.on("join_order_chat", (orderId) => {
@@ -96,14 +130,13 @@ io.on("connection", (socket) => {
     );
   });
 
-  // Evento cuando se envía un mensaje dentro del chat
+  // Evento: envío de mensajes de chat
   socket.on("send_message", async (data) => {
     try {
       const { orderId, senderRole, senderName, text } = data;
 
       if (!orderId || !text) return;
 
-      // Guardar el mensaje en MongoDB
       const newMessage = new Message({
         orderId,
         senderRole,
@@ -112,15 +145,24 @@ io.on("connection", (socket) => {
       });
       await newMessage.save();
 
-      // Emitir a ambas variantes de la sala para garantizar que cliente y repartidor reciban
       io.to(orderId).to(`order_${orderId}`).emit("receive_message", newMessage);
     } catch (error) {
       console.error("Error al guardar/transmitir mensaje en WebSocket:", error);
     }
   });
 
+  // Desconexión limpia del usuario/conductor
   socket.on("disconnect", () => {
     console.log(`❌ Usuario desconectado del WebSocket: ${socket.id}`);
+
+    // Limpiar mapa si el socket pertenecía a un conductor
+    for (const [driverId, info] of activeDriversLocations.entries()) {
+      if (info.socketId === socket.id) {
+        activeDriversLocations.delete(driverId);
+        io.emit("driver_disconnected_location", { driverId });
+        break;
+      }
+    }
   });
 });
 
@@ -130,7 +172,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
 
-// 🌐 Ruta comodín (Catch-all) para Single Page Application (React Router)
+// 🌐 Ruta comodín para Single Page Application
 app.get(/(.*)/, (req, res) => {
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {
@@ -142,11 +184,8 @@ app.get(/(.*)/, (req, res) => {
   }
 });
 
-// Puerto
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(
-    `🚀 Servidor e infraestructura de WebSockets corriendo en puerto ${PORT}`,
-  );
+  console.log(`🚀 Servidor con WebSockets y GPS activo en puerto ${PORT}`);
 });

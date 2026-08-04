@@ -19,6 +19,9 @@ export const createOrder = async (req, res) => {
       subtotal,
       deliveryFee,
       total,
+      originCoords, // { lat: Number, lng: Number }
+      destinationCoords, // { lat: Number, lng: Number }
+      notes,
     } = req.body;
 
     const deliveryPin = generateDeliveryPin();
@@ -37,6 +40,10 @@ export const createOrder = async (req, res) => {
       deliveryPin,
       status: "pending_driver",
       counterOffers: [],
+      notes: notes || "",
+      // Campos de Geolocalización para MapView.jsx
+      originCoords: originCoords || null,
+      destinationCoords: destinationCoords || null,
     });
 
     await newOrder.save();
@@ -253,7 +260,6 @@ export const sendCounterOffer = async (req, res) => {
       createdAt: new Date(),
     };
 
-    // $push guarda la oferta directamente dentro de la orden en MongoDB
     const order = await Order.findByIdAndUpdate(
       orderId,
       { $push: { counterOffers: newOffer } },
@@ -390,5 +396,59 @@ export const getOrderById = async (req, res) => {
   } catch (error) {
     console.error("Error al obtener la orden por ID:", error);
     res.status(500).json({ message: "Error interno al consultar la orden." });
+  }
+};
+
+// 11. NUEVO: Actualizar la ubicación GPS en vivo del mototaxista (Rastreo en Tiempo Real)
+export const updateDriverLocation = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { lat, lng, heading } = req.body;
+
+    if (lat === undefined || lng === undefined) {
+      return res
+        .status(400)
+        .json({ message: "Coordenadas lat y lng requeridas." });
+    }
+
+    const driverLocation = {
+      lat: Number(lat),
+      lng: Number(lng),
+      heading: heading ? Number(heading) : 0,
+      updatedAt: new Date(),
+    };
+
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      { driverLocation },
+      { new: true },
+    );
+
+    if (!order) {
+      return res.status(404).json({ message: "Orden no encontrada." });
+    }
+
+    // Emitir ubicación por WebSockets a las salas correspondientes
+    const io = req.app.get("io");
+    if (io) {
+      const locationPayload = {
+        orderId: order._id,
+        driverLocation,
+      };
+      io.to(`order_${order._id}`).emit(
+        "driver_location_updated",
+        locationPayload,
+      );
+      io.to(`order_${order._id}`).emit("location_updated", locationPayload);
+      io.emit("driver_location_updated", locationPayload);
+    }
+
+    res.json({
+      message: "Ubicación actualizada correctamente.",
+      driverLocation,
+    });
+  } catch (error) {
+    console.error("Error al actualizar la ubicación del motocarro:", error);
+    res.status(500).json({ message: "Error al actualizar la ubicación GPS." });
   }
 };

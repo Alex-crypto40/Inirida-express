@@ -22,7 +22,7 @@ const checkIsRide = (order) => {
   );
 };
 
-export default function DriverDashboard() {
+export default function DriverDashboard({ socket }) {
   const [driver, setDriver] = useState(() => {
     const saved = localStorage.getItem("driverInfo");
     return saved
@@ -41,6 +41,47 @@ export default function DriverDashboard() {
   const modifiedOffersRef = useRef({});
 
   const MAX_INCREMENT = 3000;
+
+  // 🛰️ EFECTO GPS: Rastreo en tiempo real mediante WebSockets cuando está En Línea
+  useEffect(() => {
+    let watchId;
+    const driverId = driver.id || driver._id;
+
+    if (driver.isOnline && socket && driverId) {
+      if ("geolocation" in navigator) {
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const { latitude, longitude } = position.coords;
+
+            // Transmitir coordenadas al servidor vía WebSocket
+            socket.emit("update_driver_location", {
+              driverId,
+              driverName: driver.name || "Conductor Motocarro",
+              lat: latitude,
+              lng: longitude,
+              isAvailable: true,
+            });
+          },
+          (error) => console.error("Error al obtener ubicación GPS:", error),
+          {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 10000,
+          },
+        );
+      }
+    } else if (!driver.isOnline && socket && driverId) {
+      // Notificar al servidor que el conductor se desconectó del mapa
+      socket.emit("update_driver_location", {
+        driverId,
+        isAvailable: false,
+      });
+    }
+
+    return () => {
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+    };
+  }, [driver.isOnline, driver.id, driver.name, socket]);
 
   // 1. Cargar pedidos disponibles
   const fetchAvailableOrders = async () => {

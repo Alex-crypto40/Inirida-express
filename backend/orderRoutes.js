@@ -8,6 +8,7 @@ import {
   takeOrder,
   sendCounterOffer,
   updateOrderStatus,
+  updateDriverLocation, // <-- Importado para rastreo GPS
   rateOrder,
   cancelOrder,
 } from "./orderController.js";
@@ -42,6 +43,10 @@ router.post("/:orderId/take", takeOrder);
 
 // Enviar contraoferta al cliente (Motocarros)
 router.post("/:orderId/counter-offer", sendCounterOffer);
+
+// Actualizar ubicación GPS en tiempo real del mototaxista
+router.put("/:orderId/location", updateDriverLocation);
+router.patch("/:orderId/location", updateDriverLocation);
 
 // Cancelar carrera / pedido (Resuelve el 404 al presionar Cancelar)
 router.patch("/:orderId/cancel", cancelOrder);

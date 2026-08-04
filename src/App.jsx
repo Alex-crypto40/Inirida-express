@@ -1,5 +1,22 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Routes, Route, Link } from "react-router-dom";
+import { io } from "socket.io-client";
+
+// Estilos CSS indispensables de Leaflet
+import "leaflet/dist/leaflet.css";
+
+// Corrección de rutas para los marcadores por defecto en Leaflet con React/Vite
+import L from "leaflet";
+import markerIcon2x from "leaflet/dist/images/marker-icon-2x.png";
+import markerIcon from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconUrl: markerIcon,
+  iconRetinaUrl: markerIcon2x,
+  shadowUrl: markerShadow,
+});
 
 import Home from "./views/Home";
 import Login from "./views/Login";
@@ -9,6 +26,11 @@ import AdminStore from "./views/AdminStore";
 import RegisterStore from "./views/RegisterStore";
 import DriverDashboard from "./views/DriverDashboard";
 import DriverLogin from "./views/DriverLogin";
+
+// URL de tu servidor backend en Render o localhost
+const SOCKET_URL =
+  import.meta.env.VITE_BACKEND_URL ||
+  "https://inirida-express-frontend.onrender.com";
 
 // Vista para la convocatoria de domiciliarios
 function Repartidores() {
@@ -34,18 +56,37 @@ function Repartidores() {
 }
 
 function App() {
+  const [socket, setSocket] = useState(null);
+
+  useEffect(() => {
+    // Inicializar la conexión de WebSockets de forma global
+    const newSocket = io(SOCKET_URL, {
+      transports: ["websocket", "polling"],
+      withCredentials: true,
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.close();
+    };
+  }, []);
+
   return (
     <CartProvider>
       <div className="bg-gray-50 min-h-screen flex flex-col w-full">
         <main className="max-w-md w-full mx-auto flex-1 overflow-x-hidden">
-          {/* Intercambio de pantallas */}
+          {/* Intercambio de pantallas pasando la instancia de socket */}
           <Routes>
-            <Route path="/" element={<Home />} />
+            <Route path="/" element={<Home socket={socket} />} />
             <Route path="/login" element={<Login />} />
             <Route path="/unete-repartidor" element={<Repartidores />} />
             <Route path="/store/:id" element={<StoreDetail />} />
             <Route path="/driver-login" element={<DriverLogin />} />
-            <Route path="/driver" element={<DriverDashboard />} />
+            <Route
+              path="/driver"
+              element={<DriverDashboard socket={socket} />}
+            />
             <Route path="/admin/:storeId" element={<AdminStore />} />
             <Route path="/register-store" element={<RegisterStore />} />
           </Routes>

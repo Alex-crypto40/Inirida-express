@@ -30,16 +30,36 @@ const OrderChatModal = ({
         ? "Conductor"
         : "Comercio");
 
+  // Cerrar modal al presionar la tecla ESC
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   useEffect(() => {
     if (!orderId) return;
 
     // 1. Cargar historial de mensajes previo desde el backend
     const fetchHistory = async () => {
       try {
-        const response = await fetch(`${BASE_URL}/orders/${orderId}/messages`);
+        const response = await fetch(
+          `${BASE_URL}/api/orders/${orderId}/messages`,
+        );
         if (response.ok) {
           const data = await response.json();
-          setMessages(data);
+          setMessages(Array.isArray(data) ? data : []);
+        } else {
+          // Fallback a ruta legacy por compatibilidad
+          const legacyRes = await fetch(
+            `${BASE_URL}/orders/${orderId}/messages`,
+          );
+          if (legacyRes.ok) {
+            const legacyData = await legacyRes.json();
+            setMessages(Array.isArray(legacyData) ? legacyData : []);
+          }
         }
       } catch (error) {
         console.error("Error al cargar historial del chat:", error);
@@ -48,28 +68,31 @@ const OrderChatModal = ({
 
     fetchHistory();
 
-    // 2. Conectar al servidor WebSocket
-    socketRef.current = io(BASE_URL);
+    // 2. Conectar al servidor WebSocket con opciones de transporte robustas
+    socketRef.current = io(BASE_URL, {
+      transports: ["websocket", "polling"],
+      reconnectionAttempts: 5,
+    });
 
-    // Unirse a la sala única de esta orden
+    // Unirse a las salas del pedido
     socketRef.current.emit("join_order_chat", orderId);
-    socketRef.current.emit("join_order", `order_${orderId}`); // Compatibilidad cruzada
+    socketRef.current.emit("join_order", `order_${orderId}`);
     socketRef.current.emit("join_order", orderId);
 
     // Escuchar mensajes en tiempo real previniendo duplicados
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
-        // Si el mensaje ya existe en el estado local por ID o coincidencia exacta, no se duplica
-        const isDuplicate = prev.some(
-          (m) =>
-            (m._id && newMessage._id && m._id === newMessage._id) ||
-            (m.text === newMessage.text &&
-              m.senderRole === newMessage.senderRole &&
-              Math.abs(
-                new Date(m.createdAt || Date.now()) -
-                  new Date(newMessage.createdAt || Date.now()),
-              ) < 1000),
-        );
+        // Verificar si existe duplicado estricto por ID o coincidencia exacta de texto y tiempo
+        const isDuplicate = prev.some((m) => {
+          if (m._id && newMessage._id && m._id === newMessage._id) return true;
+          const sameText = m.text === newMessage.text;
+          const sameRole = m.senderRole === newMessage.senderRole;
+          const timeDiff = Math.abs(
+            new Date(m.createdAt || Date.now()) -
+              new Date(newMessage.createdAt || Date.now()),
+          );
+          return sameText && sameRole && timeDiff < 2000;
+        });
 
         if (isDuplicate) return prev;
         return [...prev, newMessage];
@@ -88,7 +111,7 @@ const OrderChatModal = ({
     };
   }, [orderId]);
 
-  // Auto-scroll al último mensaje enviado o recibido
+  // Auto-scroll al recibir o enviar mensajes
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -100,7 +123,7 @@ const OrderChatModal = ({
     if (!cleanText) return;
 
     const messageData = {
-      _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`, // ID temporal para UI optimista
+      _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       orderId,
       senderRole: role, // "driver" | "client" | "store"
       senderName: name,
@@ -108,11 +131,11 @@ const OrderChatModal = ({
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Actualización optimista local (UI inmediata)
+    // 1. Actualización optimista local
     setMessages((prev) => [...prev, messageData]);
 
     // 2. Emitir mensaje por WebSockets al backend
-    if (socketRef.current) {
+    if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit("send_message", {
         orderId,
         senderRole: role,
@@ -140,7 +163,7 @@ const OrderChatModal = ({
     }
   };
 
-  // Helper para dar formato de hora legible (ej: 10:30 a. m.)
+  // Dar formato de hora legible (ej: 10:30 a. m.)
   const formatTime = (isoString) => {
     if (!isoString) return "";
     try {
@@ -157,9 +180,13 @@ const OrderChatModal = ({
   return (
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
-      style={{ zIndex: 1060 }} // Capa z-index garantizada sobre la tarjeta flotante
+      style={{ zIndex: 1060 }}
+      onClick={onClose} // Cerrar al tocar el fondo fuera de la caja
     >
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100">
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150"
+        onClick={(e) => e.stopPropagation()} // Prevenir cierre al hacer clic dentro
+      >
         {/* Encabezado del Chat */}
         <div className="bg-orange-500 text-white p-4 flex justify-between items-center shadow-md">
           <div>
@@ -214,13 +241,15 @@ const OrderChatModal = ({
                   </div>
 
                   <div
-                    className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm relative ${
+                    className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-xs relative ${
                       isMe
                         ? "bg-orange-500 text-white rounded-tr-none"
                         : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
                     }`}
                   >
-                    <div>{msg.text}</div>
+                    <div className="whitespace-pre-wrap break-words">
+                      {msg.text}
+                    </div>
                     <span
                       className={`block text-[9px] mt-1 text-right ${
                         isMe ? "text-orange-200" : "text-gray-400"
@@ -239,14 +268,14 @@ const OrderChatModal = ({
         {/* Formulario de Envío */}
         <form
           onSubmit={handleSendMessage}
-          className="p-3 bg-white border-t flex gap-2"
+          className="p-3 bg-white border-t border-gray-100 flex gap-2"
         >
           <input
             type="text"
             placeholder="Escribe un mensaje..."
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+            className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
           />
           <button
             type="submit"

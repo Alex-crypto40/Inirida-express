@@ -1,15 +1,21 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 function MotocarroForm({ onOrderCreated }) {
-  // 1. Datos del cliente y ruta
-  const [telefono, setTelefono] = useState("");
-  const [nombre, setNombre] = useState("");
+  // 1. Cargar datos del cliente previamente guardados si existen
+  const [telefono, setTelefono] = useState(
+    () => localStorage.getItem("userPhone") || "",
+  );
+  const [nombre, setNombre] = useState(
+    () => localStorage.getItem("userName") || "",
+  );
+
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
   const [comentarios, setComentarios] = useState("");
 
-  // Estado para la lectura GPS
+  // Estados de carga y envío
   const [loadingGps, setLoadingGps] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   // 2. Opciones de viaje
   const [zona, setZona] = useState("urbana");
@@ -56,7 +62,7 @@ function MotocarroForm({ onOrderCreated }) {
     }
   };
 
-  // Función para capturar ubicación con GPS
+  // Capturar ubicación con GPS (Nominatim / Google Maps fallback)
   const obtenerUbicacionGPS = () => {
     if (!navigator.geolocation) {
       alert("Tu navegador o dispositivo no soporta geolocalización.");
@@ -78,7 +84,8 @@ function MotocarroForm({ onOrderCreated }) {
           const barrioOCalle =
             data.address?.road ||
             data.address?.suburb ||
-            data.address?.neighbourhood;
+            data.address?.neighbourhood ||
+            data.address?.village;
 
           if (barrioOCalle) {
             setOrigen(`📍 Ubicación GPS (${barrioOCalle}, Inírida)`);
@@ -109,6 +116,12 @@ function MotocarroForm({ onOrderCreated }) {
       );
       return;
     }
+
+    setSubmitting(true);
+
+    // Guardar datos de contacto localmente para futuras solicitudes
+    localStorage.setItem("userPhone", telefono.trim());
+    if (nombre.trim()) localStorage.setItem("userName", nombre.trim());
 
     const esAcuerdo = zona === "acuerdo";
     const nombreTarifa = zonasTarifas[zona]?.nombre || "Zona General";
@@ -144,11 +157,12 @@ function MotocarroForm({ onOrderCreated }) {
     };
 
     try {
-      let envUrl =
+      const baseUrl =
         import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
-
-      let cleanUrl = envUrl.replace(/\/+$/, "").replace(/\/api$/, "");
-      const targetEndpoint = `${cleanUrl}/api/orders`;
+      const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+      const targetEndpoint = cleanBaseUrl.endsWith("/api")
+        ? `${cleanBaseUrl}/orders`
+        : `${cleanBaseUrl}/api/orders`;
 
       const res = await fetch(targetEndpoint, {
         method: "POST",
@@ -156,11 +170,11 @@ function MotocarroForm({ onOrderCreated }) {
         body: JSON.stringify(pedidoMotocarro),
       });
 
+      const data = await res.json();
+
       if (res.ok) {
-        const data = await res.json();
         const createdOrder = data.order || data;
 
-        // Guardar la referencia directa en localStorage
         if (createdOrder && createdOrder._id) {
           localStorage.setItem("activeOrderId", createdOrder._id);
         }
@@ -175,23 +189,29 @@ function MotocarroForm({ onOrderCreated }) {
           onOrderCreated(createdOrder);
         }
 
-        // Limpiar formulario tras éxito
+        // Limpieza tras envío exitoso
         setOrigen("");
         setDestino("");
         setComentarios("");
         setShowExtraOptions(false);
       } else {
-        alert("Hubo un error al crear la solicitud en el servidor.");
+        alert(
+          data.message || "Hubo un error al crear la solicitud en el servidor.",
+        );
       }
     } catch (error) {
       console.error("Error al conectar con la API:", error);
-      alert("No se pudo conectar con el servidor backend.");
+      alert(
+        "No se pudo conectar con el servidor backend. Verifica tu conexión.",
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
   return (
     <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4 max-w-md mx-auto">
-      {/* Header Breve */}
+      {/* Header */}
       <div className="flex items-center justify-between pb-2 border-b border-gray-100">
         <div className="flex items-center gap-2">
           <span className="text-xl p-2 bg-orange-100 rounded-xl">🛺</span>
@@ -205,7 +225,7 @@ function MotocarroForm({ onOrderCreated }) {
       </div>
 
       <form onSubmit={solicitarCarrera} className="space-y-3">
-        {/* Teléfono y Nombre rápido */}
+        {/* Teléfono y Nombre */}
         <div className="grid grid-cols-2 gap-2">
           <input
             type="tel"
@@ -226,10 +246,9 @@ function MotocarroForm({ onOrderCreated }) {
 
         {/* Tarjeta de Ruta Unificada con GPS */}
         <div className="bg-gray-50/80 p-3 rounded-2xl border border-gray-200/80 space-y-2 relative">
-          {/* Línea conectora visual */}
           <div className="absolute left-[22px] top-[28px] bottom-[28px] w-0.5 bg-gray-300 pointer-events-none" />
 
-          {/* Campo Origen + Botón GPS */}
+          {/* Origen + GPS */}
           <div className="flex items-center gap-2 relative z-10">
             <span className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
               A
@@ -242,19 +261,18 @@ function MotocarroForm({ onOrderCreated }) {
               className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800 truncate"
               required
             />
-            {/* Botón Geolocalización */}
             <button
               type="button"
               onClick={obtenerUbicacionGPS}
               disabled={loadingGps}
-              className="p-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 cursor-pointer"
+              className="p-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-50"
               title="Obtener mi ubicación actual por GPS"
             >
               {loadingGps ? "⌛" : "📍 GPS"}
             </button>
           </div>
 
-          {/* Campo Destino */}
+          {/* Destino */}
           <div className="flex items-center gap-2 relative z-10">
             <span className="w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
               B
@@ -269,7 +287,7 @@ function MotocarroForm({ onOrderCreated }) {
             />
           </div>
 
-          {/* Chips Rápidos de Destino */}
+          {/* Chips Rápidos */}
           <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
             {[
               "Centro",
@@ -291,13 +309,12 @@ function MotocarroForm({ onOrderCreated }) {
           </div>
         </div>
 
-        {/* Seleccionar Tarifa / Tipo de Trayecto */}
+        {/* Tarifas y Zonas */}
         <div className="space-y-1.5">
           <label className="text-[10px] font-bold text-gray-500 uppercase tracking-wider block">
             Selecciona la tarifa o trayecto
           </label>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
-            {/* Urbana */}
             <button
               type="button"
               onClick={() => handleSelectZona("urbana")}
@@ -311,7 +328,6 @@ function MotocarroForm({ onOrderCreated }) {
               <span className="block text-xs font-black">$4.000</span>
             </button>
 
-            {/* Centro / Especial */}
             <button
               type="button"
               onClick={() => handleSelectZona("coco")}
@@ -325,7 +341,6 @@ function MotocarroForm({ onOrderCreated }) {
               <span className="block text-xs font-black">$6.000</span>
             </button>
 
-            {/* Aeropuerto */}
             <button
               type="button"
               onClick={() => handleSelectZona("aeropuerto")}
@@ -339,7 +354,6 @@ function MotocarroForm({ onOrderCreated }) {
               <span className="block text-xs font-black">$12.000</span>
             </button>
 
-            {/* Negociar / Sabanitas / Caño Vitina */}
             <button
               type="button"
               onClick={() => handleSelectZona("acuerdo")}
@@ -354,7 +368,6 @@ function MotocarroForm({ onOrderCreated }) {
             </button>
           </div>
 
-          {/* Nota informativa cuando se elige Negociar */}
           {zona === "acuerdo" && (
             <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-medium leading-tight">
               💬 <strong>Zona alejada:</strong> Acuerda el valor final con el
@@ -379,7 +392,6 @@ function MotocarroForm({ onOrderCreated }) {
 
           {showExtraOptions && (
             <div className="mt-2 p-3 bg-gray-50 rounded-xl space-y-3 border border-gray-200/60 text-xs">
-              {/* Pasajeros */}
               <div className="flex justify-between items-center">
                 <span className="text-gray-600 font-medium">Pasajeros:</span>
                 <div className="flex gap-1">
@@ -400,7 +412,6 @@ function MotocarroForm({ onOrderCreated }) {
                 </div>
               </div>
 
-              {/* Toggles Carga / Mascotas */}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -427,7 +438,6 @@ function MotocarroForm({ onOrderCreated }) {
                 </button>
               </div>
 
-              {/* Detalle Opcional */}
               <input
                 type="text"
                 placeholder="Notas extras (Ej: Frente al árbol grande)"
@@ -439,12 +449,15 @@ function MotocarroForm({ onOrderCreated }) {
           )}
         </div>
 
-        {/* Botón Principal de Acción */}
+        {/* Botón Principal */}
         <button
           type="submit"
-          className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-between px-4"
+          disabled={submitting}
+          className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-between px-4 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          <span>Solicitar Motocarro 🚀</span>
+          <span>
+            {submitting ? "Procesando... ⏳" : "Solicitar Motocarro 🚀"}
+          </span>
           <span className="bg-white/20 px-3 py-1 rounded-xl text-xs backdrop-blur-xs font-black">
             {zona === "acuerdo"
               ? "A convenir 💬"

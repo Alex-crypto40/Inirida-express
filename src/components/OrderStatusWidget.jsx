@@ -24,7 +24,7 @@ export default function OrderStatusWidget({
     }
   }, [showChat]);
 
-  // Guardar en localStorage
+  // Guardar en localStorage cuando cambia la orden inicial
   useEffect(() => {
     if (initialOrder && initialOrder._id) {
       setActiveOrder(initialOrder);
@@ -32,7 +32,7 @@ export default function OrderStatusWidget({
     }
   }, [initialOrder]);
 
-  // Recuperación automática
+  // Recuperación automática de orden activa
   useEffect(() => {
     if (activeOrder && activeOrder._id) return;
 
@@ -41,19 +41,15 @@ export default function OrderStatusWidget({
       const targetCustomerId =
         customerIdProp || localStorage.getItem("userId") || "cliente";
 
-      if (
-        !storedOrderId ||
-        storedOrderId === "undefined" ||
-        storedOrderId === "null" ||
-        storedOrderId.trim() === ""
-      ) {
-        localStorage.removeItem("activeOrderId");
-        return;
-      }
+      const hasValidStoredId =
+        storedOrderId &&
+        storedOrderId !== "undefined" &&
+        storedOrderId !== "null" &&
+        storedOrderId.trim() !== "";
 
       try {
-        let res;
-        if (storedOrderId) {
+        let res = null;
+        if (hasValidStoredId) {
           res = await fetch(`${API_URL}/orders/${storedOrderId}`);
         } else if (targetCustomerId && targetCustomerId !== "cliente") {
           res = await fetch(
@@ -80,14 +76,14 @@ export default function OrderStatusWidget({
           localStorage.removeItem("activeOrderId");
         }
       } catch (error) {
-        console.error("Error al recuperar orden:", error);
+        console.error("Error al recuperar orden activa:", error);
       }
     };
 
     recoverActiveOrder();
   }, [activeOrder, customerIdProp]);
 
-  // Escuchar Sockets
+  // Escuchar Sockets en tiempo real
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
@@ -156,6 +152,7 @@ export default function OrderStatusWidget({
       }
     };
 
+    // Suscripción a eventos
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
@@ -168,6 +165,8 @@ export default function OrderStatusWidget({
     socket.on("chat_message", handleNewChatMessage);
 
     return () => {
+      socket.emit("leave_order", `order_${orderId}`);
+      socket.emit("leave_order", orderId);
       socket.off("orderUpdated", handleOrderUpdate);
       socket.off("order_status_updated", handleOrderUpdate);
       socket.off("order:status_updated", handleOrderUpdate);
@@ -184,6 +183,7 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
+  // Normalización de contraofertas y estado
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
     counterOffers.length > 0
@@ -236,11 +236,10 @@ export default function OrderStatusWidget({
   const customerName =
     activeOrder.customer?.name || activeOrder.customerName || "Cliente";
 
-  // Extraer información del origen y destino
   const origenAddress = activeOrder.customer?.address || "Ubicación cliente";
   const destinoNotes = activeOrder.customer?.notes || "";
 
-  // Corrección en la llamada de Cancelación (PATCH /status en lugar de /cancel)
+  // Handlers para acciones API
   const handleCancelOrder = async () => {
     const confirmCancel = window.confirm(
       "¿Estás seguro de que deseas cancelar la solicitud de motocarro?",
