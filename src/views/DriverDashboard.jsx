@@ -453,6 +453,56 @@ export default function DriverDashboard() {
                     </span>
                   </div>
 
+                  {/* Detalle visual de Ruta (Origen y Destino) para Carreras */}
+                  {isRide && (
+                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200/60 space-y-2 text-xs">
+                      <div className="flex items-start gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-green-500 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="text-[10px] font-bold text-gray-400 block uppercase">
+                            Origen / Recogida
+                          </span>
+                          <span className="font-semibold text-gray-800">
+                            {order.customer?.address ||
+                              "Ubicación no especificada"}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-2 pt-1 border-t border-gray-200/40">
+                        <span className="w-2.5 h-2.5 rounded-full bg-orange-500 mt-0.5 shrink-0" />
+                        <div>
+                          <span className="text-[10px] font-bold text-gray-400 block uppercase">
+                            Destino / Notas
+                          </span>
+                          <span className="font-semibold text-gray-800">
+                            {order.customer?.notes ||
+                              "Sin especificación de destino"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Indicadores Adicionales de la Carrera */}
+                  {isRide && order.rideDetails && (
+                    <div className="flex flex-wrap gap-1.5 text-[11px]">
+                      <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded-md font-medium">
+                        👥 {order.rideDetails.passengersCount || 1} Pasajero(s)
+                      </span>
+                      {order.rideDetails.hasLuggage && (
+                        <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">
+                          🧳 Con Carga
+                        </span>
+                      )}
+                      {order.rideDetails.hasPets && (
+                        <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">
+                          🐱 Con Mascota
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                   {/* Contraoferta opcional */}
                   <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
                     <span className="text-xs text-gray-500 font-medium">
