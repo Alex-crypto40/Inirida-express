@@ -144,12 +144,15 @@ function MotocarroForm({ onOrderCreated }) {
     };
 
     try {
-      // ✅ AJUSTE CORREGIDO: Garantiza que API_BASE siempre contenga un único /api al final
-      const RAW_API =
+      // ✅ Solución definitiva: Obtiene el dominio base y fuerza la inclusión de /api
+      let envUrl =
         import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
-      const API_BASE = `${RAW_API.replace(/\/api\/?$/, "")}/api`;
 
-      const res = await fetch(`${API_BASE}/orders`, {
+      // Limpia cualquier diagonal final y sufijos /api preexistentes
+      let cleanUrl = envUrl.replace(/\/+$/, "").replace(/\/api$/, "");
+      const targetEndpoint = `${cleanUrl}/api/orders`;
+
+      const res = await fetch(targetEndpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(pedidoMotocarro),
