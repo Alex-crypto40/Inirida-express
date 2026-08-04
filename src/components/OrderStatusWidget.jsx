@@ -16,16 +16,15 @@ export default function OrderStatusWidget({
   const [loadingAction, setLoadingAction] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
-  // Ref para rastrear el estado del modal sin re-renderizar sockets
   const showChatRef = useRef(showChat);
   useEffect(() => {
     showChatRef.current = showChat;
     if (showChat) {
-      setUnreadCount(0); // Limpiar mensajes no leídos si el modal está abierto
+      setUnreadCount(0);
     }
   }, [showChat]);
 
-  // 1. Guardar en localStorage cuando llega una orden inicial
+  // Guardar en localStorage
   useEffect(() => {
     if (initialOrder && initialOrder._id) {
       setActiveOrder(initialOrder);
@@ -33,7 +32,7 @@ export default function OrderStatusWidget({
     }
   }, [initialOrder]);
 
-  // 2. AUTO-RECUPERACIÓN: Si no hay activeOrder al cargar o recargar la página
+  // Recuperación automática
   useEffect(() => {
     if (activeOrder && activeOrder._id) return;
 
@@ -42,7 +41,6 @@ export default function OrderStatusWidget({
       const targetCustomerId =
         customerIdProp || localStorage.getItem("userId") || "cliente";
 
-      // 🛑 VALIDACIÓN BLINDADA: Evita hacer fetch con valores inválidos
       if (
         !storedOrderId ||
         storedOrderId === "undefined" ||
@@ -89,7 +87,7 @@ export default function OrderStatusWidget({
     recoverActiveOrder();
   }, [activeOrder, customerIdProp]);
 
-  // 3. Escuchar WebSockets (Actualizaciones de Orden + Cancelación + Chat + Contraofertas)
+  // Escuchar Sockets
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
@@ -104,7 +102,6 @@ export default function OrderStatusWidget({
 
     const handleOrderUpdate = (updatedOrder) => {
       if (!updatedOrder) return;
-
       const receivedId =
         updatedOrder._id || updatedOrder.orderId || updatedOrder.id;
 
@@ -128,7 +125,6 @@ export default function OrderStatusWidget({
       }
     };
 
-    // Handler explícito para cancelaciones vía WebSocket
     const handleOrderCancelled = (data) => {
       const cancelledId = data?._id || data?.orderId || data?.id || data;
       if (cancelledId === orderId) {
@@ -137,7 +133,6 @@ export default function OrderStatusWidget({
       }
     };
 
-    // Listener para nuevos mensajes en el Chat
     const handleNewChatMessage = (msg) => {
       if (
         msg &&
@@ -150,7 +145,6 @@ export default function OrderStatusWidget({
 
       if (!showChatRef.current) {
         setUnreadCount((prev) => prev + 1);
-
         try {
           const audio = new Audio(
             "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
@@ -162,7 +156,6 @@ export default function OrderStatusWidget({
       }
     };
 
-    // Subscripción de eventos de orden
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
@@ -170,8 +163,6 @@ export default function OrderStatusWidget({
     socket.on("order:cancelled", handleOrderCancelled);
     socket.on("counter_offer_received", handleOrderUpdate);
     socket.on("counterOffer", handleOrderUpdate);
-
-    // Eventos de mensajes
     socket.on("new_message", handleNewChatMessage);
     socket.on("receive_message", handleNewChatMessage);
     socket.on("chat_message", handleNewChatMessage);
@@ -193,7 +184,6 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
-  // Lógica de detección de contraofertas
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
     counterOffers.length > 0
@@ -246,7 +236,11 @@ export default function OrderStatusWidget({
   const customerName =
     activeOrder.customer?.name || activeOrder.customerName || "Cliente";
 
-  // Acciones de la orden
+  // Extraer información del origen y destino
+  const origenAddress = activeOrder.customer?.address || "Ubicación cliente";
+  const destinoNotes = activeOrder.customer?.notes || "";
+
+  // Corrección en la llamada de Cancelación (PATCH /status en lugar de /cancel)
   const handleCancelOrder = async () => {
     const confirmCancel = window.confirm(
       "¿Estás seguro de que deseas cancelar la solicitud de motocarro?",
@@ -255,10 +249,13 @@ export default function OrderStatusWidget({
 
     setLoadingAction(true);
     try {
-      const res = await fetch(`${API_URL}/orders/${activeOrder._id}/cancel`, {
-        method: "POST",
+      const res = await fetch(`${API_URL}/orders/${activeOrder._id}/status`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "Cancelado por el cliente" }),
+        body: JSON.stringify({
+          status: "cancelled",
+          reason: "Cancelado por el cliente",
+        }),
       });
 
       if (res.ok) {
@@ -338,7 +335,6 @@ export default function OrderStatusWidget({
 
   return (
     <>
-      {/* Tarjeta Flotante del Cliente */}
       <div
         className="position-fixed bottom-0 start-50 translate-middle-x mb-4 p-3.5 bg-white shadow-2xl rounded-3xl border border-orange-300 flex flex-col justify-between"
         style={{
@@ -348,7 +344,6 @@ export default function OrderStatusWidget({
           boxShadow: "0 12px 30px -5px rgba(234, 88, 12, 0.25)",
         }}
       >
-        {/* Cabecera del Estado */}
         <div className="d-flex justify-content-between align-items-center mb-2.5 pb-2 border-b border-gray-100">
           <h6 className="m-0 font-extrabold text-sm text-gray-800 flex items-center gap-2">
             <span className="p-1 bg-orange-100 rounded-lg">🛺</span> Estado de
@@ -372,7 +367,21 @@ export default function OrderStatusWidget({
           </span>
         </div>
 
-        {/* ESTADO 0: NUEVA CONTRAOFERTA RECIBIDA */}
+        {/* DETALLE VISUAL DE LA RUTA */}
+        <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1 text-xs">
+          <div className="flex items-center gap-1.5 text-gray-700">
+            <span className="text-green-600 font-bold">📍 Origen:</span>
+            <span className="truncate font-medium">{origenAddress}</span>
+          </div>
+          {destinoNotes && (
+            <div className="flex items-center gap-1.5 text-gray-700">
+              <span className="text-orange-600 font-bold">🏁 Detalle:</span>
+              <span className="truncate font-medium">{destinoNotes}</span>
+            </div>
+          )}
+        </div>
+
+        {/* CONTRAOFERTA RECIBIDA */}
         {hasCounterOffer && activeCounterOffer && (
           <div className="my-2 p-3 bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl border-2 border-orange-400 text-center shadow-sm">
             <p className="text-xs text-orange-950 font-bold mb-1">
@@ -410,9 +419,9 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* ESTADO 1: BUSCANDO CONDUCTOR */}
+        {/* BUSCANDO CONDUCTOR */}
         {isPending && (
-          <div className="text-center my-3 space-y-3">
+          <div className="text-center my-2 space-y-2">
             <div className="flex items-center justify-center gap-2 bg-amber-50 py-2 px-3 rounded-xl border border-amber-200">
               <div
                 className="spinner-border text-warning spinner-border-sm"
@@ -434,7 +443,7 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* ESTADO 2: CONDUCTOR EN CAMINO */}
+        {/* CONDUCTOR EN CAMINO */}
         {isAccepted && (
           <div className="space-y-3 mt-1">
             {pinCode && activeOrder.serviceType !== "ride" && (
@@ -451,7 +460,6 @@ export default function OrderStatusWidget({
               </div>
             )}
 
-            {/* Ficha del Conductor */}
             <div className="bg-gradient-to-br from-gray-50 to-orange-50/30 p-3 rounded-2xl border border-orange-100 text-xs space-y-1.5 shadow-xs">
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-gray-500 font-medium">👤 Conductor:</span>
@@ -473,7 +481,6 @@ export default function OrderStatusWidget({
               </div>
             </div>
 
-            {/* BOTÓN DE CHAT CON NOTIFICACIÓN/BADGE */}
             <div className="pt-0.5">
               <button
                 type="button"
@@ -498,7 +505,7 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* ESTADO 3: CARRERA FINALIZADA */}
+        {/* CARRERA FINALIZADA */}
         {isCompleted && (
           <div className="text-center my-2 p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
             <span className="text-xl">🎉</span>
