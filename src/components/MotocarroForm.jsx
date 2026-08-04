@@ -144,8 +144,10 @@ function MotocarroForm({ onOrderCreated }) {
     };
 
     try {
-      const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
-      const API_BASE = RAW_API.replace(/\/api\/?$/, "");
+      // ✅ AJUSTE CORREGIDO: Garantiza que API_BASE siempre contenga un único /api al final
+      const RAW_API =
+        import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+      const API_BASE = `${RAW_API.replace(/\/api\/?$/, "")}/api`;
 
       const res = await fetch(`${API_BASE}/orders`, {
         method: "POST",
