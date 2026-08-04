@@ -64,7 +64,7 @@ const OrderChatModal = ({
         // Si el mensaje ya existe en el estado local por ID o coincidencia exacta, no se duplica
         const isDuplicate = prev.some(
           (m) =>
-            (m._id && m._id === newMessage._id) ||
+            (m._id && newMessage._id && m._id === newMessage._id) ||
             (m.text === newMessage.text &&
               m.senderRole === newMessage.senderRole &&
               Math.abs(
@@ -98,19 +98,30 @@ const OrderChatModal = ({
   // Enviar mensaje
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!text.trim()) return;
+    const cleanText = text.trim();
+    if (!cleanText) return;
 
     const messageData = {
+      _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`, // ID temporal para UI optimista
       orderId,
       senderRole: role, // "driver" | "client" | "store"
       senderName: name,
-      text: text.trim(),
+      text: cleanText,
       createdAt: new Date().toISOString(),
     };
 
-    // Emitir mensaje por WebSockets
+    // 1. Actualización optimista local (UI inmediata)
+    setMessages((prev) => [...prev, messageData]);
+
+    // 2. Emitir mensaje por WebSockets al backend
     if (socketRef.current) {
-      socketRef.current.emit("send_message", messageData);
+      socketRef.current.emit("send_message", {
+        orderId,
+        senderRole: role,
+        senderName: name,
+        text: cleanText,
+        createdAt: messageData.createdAt,
+      });
     }
 
     setText("");
@@ -128,6 +139,20 @@ const OrderChatModal = ({
         return { label: "Cliente 👤", bg: "bg-green-100 text-green-800" };
       default:
         return { label: "Usuario", bg: "bg-gray-100 text-gray-800" };
+    }
+  };
+
+  // Helper para dar formato de hora legible (ej: 10:30 a. m.)
+  const formatTime = (isoString) => {
+    if (!isoString) return "";
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch {
+      return "";
     }
   };
 
@@ -191,13 +216,20 @@ const OrderChatModal = ({
                   </div>
 
                   <div
-                    className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm ${
+                    className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-sm relative ${
                       isMe
                         ? "bg-orange-500 text-white rounded-tr-none"
                         : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
                     }`}
                   >
-                    {msg.text}
+                    <div>{msg.text}</div>
+                    <span
+                      className={`block text-[9px] mt-1 text-right ${
+                        isMe ? "text-orange-200" : "text-gray-400"
+                      }`}
+                    >
+                      {formatTime(msg.createdAt)}
+                    </span>
                   </div>
                 </div>
               );

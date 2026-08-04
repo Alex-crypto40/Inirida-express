@@ -24,17 +24,17 @@ export default function OrderStatusWidget({
     }
   }, [showChat]);
 
-  // 1. Guardar en localStorage
+  // 1. Guardar en localStorage cuando llega una orden inicial
   useEffect(() => {
-    if (initialOrder) {
+    if (initialOrder && initialOrder._id) {
       setActiveOrder(initialOrder);
       localStorage.setItem("activeOrderId", initialOrder._id);
     }
   }, [initialOrder]);
 
-  // 2. AUTO-RECUPERACIÓN: Si no hay initialOrder
+  // 2. AUTO-RECUPERACIÓN: Si no hay activeOrder al cargar o recargar la página
   useEffect(() => {
-    if (activeOrder) return;
+    if (activeOrder && activeOrder._id) return;
 
     const recoverActiveOrder = async () => {
       const storedOrderId = localStorage.getItem("activeOrderId");
@@ -75,22 +75,26 @@ export default function OrderStatusWidget({
     recoverActiveOrder();
   }, [activeOrder, customerIdProp]);
 
-  // 3. Escuchar WebSockets (Actualizaciones de Orden + Mensajes del Chat)
+  // 3. Escuchar WebSockets (Actualizaciones de Orden + Mensajes del Chat + Contraofertas)
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
 
     const SOCKET_URL = API_URL.replace(/\/api\/?$/, "");
-    const socket = io(SOCKET_URL);
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket", "polling"],
+    });
 
     socket.emit("join_order", `order_${orderId}`);
     socket.emit("join_order", orderId);
 
     const handleOrderUpdate = (updatedOrder) => {
-      if (
-        updatedOrder &&
-        (updatedOrder._id === orderId || updatedOrder.orderId === orderId)
-      ) {
+      if (!updatedOrder) return;
+
+      const receivedId =
+        updatedOrder._id || updatedOrder.orderId || updatedOrder.id;
+
+      if (receivedId === orderId || !receivedId) {
         setActiveOrder((prev) => {
           const nextState = {
             ...prev,
@@ -111,16 +115,18 @@ export default function OrderStatusWidget({
 
     // Listener para nuevos mensajes en el Chat
     const handleNewChatMessage = (msg) => {
-      // Ignorar mensajes enviados por el propio cliente
-      if (msg && (msg.senderRole === "customer" || msg.sender === "customer")) {
+      if (
+        msg &&
+        (msg.senderRole === "customer" ||
+          msg.sender === "customer" ||
+          msg.senderRole === "client")
+      ) {
         return;
       }
 
-      // Si el modal de chat no está abierto, notificar al usuario
       if (!showChatRef.current) {
         setUnreadCount((prev) => prev + 1);
 
-        // Reproducir sonido de notificación
         try {
           const audio = new Audio(
             "https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3",
@@ -132,10 +138,12 @@ export default function OrderStatusWidget({
       }
     };
 
+    // Subscripción de eventos
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
     socket.on("counter_offer_received", handleOrderUpdate);
+    socket.on("counterOffer", handleOrderUpdate);
 
     // Eventos de mensajes
     socket.on("new_message", handleNewChatMessage);
@@ -147,6 +155,7 @@ export default function OrderStatusWidget({
       socket.off("order_status_updated", handleOrderUpdate);
       socket.off("order:status_updated", handleOrderUpdate);
       socket.off("counter_offer_received", handleOrderUpdate);
+      socket.off("counterOffer", handleOrderUpdate);
       socket.off("new_message", handleNewChatMessage);
       socket.off("receive_message", handleNewChatMessage);
       socket.off("chat_message", handleNewChatMessage);
@@ -156,6 +165,60 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
+  // Lógica de detección de contraofertas robusta
+  const counterOffers = activeOrder.counterOffers || [];
+  const activeCounterOffer =
+    counterOffers.length > 0
+      ? counterOffers[counterOffers.length - 1]
+      : activeOrder.pendingCounterOffer ||
+        activeOrder.counterOffer ||
+        (activeOrder.proposedPrice
+          ? {
+              proposedPrice: activeOrder.proposedPrice,
+              driverName: activeOrder.driverName || activeOrder.driver?.name,
+              driverId: activeOrder.driverId || activeOrder.driver?._id,
+            }
+          : null);
+
+  const status = activeOrder.status;
+
+  const hasCounterOffer =
+    Boolean(activeCounterOffer) &&
+    [
+      "pending",
+      "pending_driver",
+      "counter_offer",
+      "counter_offered",
+      "negotiating",
+    ].includes(status);
+
+  const isPending =
+    ["pending", "pending_driver"].includes(status) && !hasCounterOffer;
+
+  const isAccepted = [
+    "assigned",
+    "accepted",
+    "in_transit",
+    "on_the_way",
+    "at_store",
+    "in_progress",
+  ].includes(status);
+
+  const isCompleted = status === "completed";
+
+  const driver =
+    activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
+  const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
+
+  const customerId =
+    activeOrder.customer?._id ||
+    activeOrder.customer?.id ||
+    activeOrder.customerId ||
+    "cliente";
+  const customerName =
+    activeOrder.customer?.name || activeOrder.customerName || "Cliente";
+
+  // Acciones de la orden
   const handleCancelOrder = async () => {
     const confirmCancel = window.confirm(
       "¿Estás seguro de que deseas cancelar la solicitud de motocarro?",
@@ -185,12 +248,6 @@ export default function OrderStatusWidget({
     }
   };
 
-  const counterOffers = activeOrder.counterOffers || [];
-  const activeCounterOffer =
-    counterOffers.length > 0
-      ? counterOffers[counterOffers.length - 1]
-      : activeOrder.pendingCounterOffer || activeOrder.counterOffer || null;
-
   const handleAcceptCounterOffer = async () => {
     if (!activeCounterOffer) return;
     setLoadingAction(true);
@@ -208,8 +265,11 @@ export default function OrderStatusWidget({
       );
 
       const data = await res.json();
-      if (res.ok) setActiveOrder(data.order || data);
-      else alert(data.message || "No se pudo aceptar la contraoferta.");
+      if (res.ok) {
+        setActiveOrder(data.order || data);
+      } else {
+        alert(data.message || "No se pudo aceptar la contraoferta.");
+      }
     } catch (error) {
       alert("Error de conexión al aceptar la propuesta.");
     } finally {
@@ -231,47 +291,17 @@ export default function OrderStatusWidget({
       );
 
       const data = await res.json();
-      if (res.ok) setActiveOrder(data.order || data);
-      else alert(data.message || "Error al rechazar la oferta.");
+      if (res.ok) {
+        setActiveOrder(data.order || data);
+      } else {
+        alert(data.message || "Error al rechazar la oferta.");
+      }
     } catch (error) {
       alert("Error de conexión al rechazar la propuesta.");
     } finally {
       setLoadingAction(false);
     }
   };
-
-  const driver =
-    activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
-  const status = activeOrder.status;
-  const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
-
-  const hasCounterOffer =
-    Boolean(activeCounterOffer) &&
-    ["pending", "pending_driver", "counter_offer", "counter_offered"].includes(
-      status,
-    );
-
-  const isPending =
-    ["pending", "pending_driver"].includes(status) && !hasCounterOffer;
-
-  const isAccepted = [
-    "assigned",
-    "accepted",
-    "in_transit",
-    "on_the_way",
-    "at_store",
-    "in_progress",
-  ].includes(status);
-
-  const isCompleted = status === "completed";
-
-  const customerId =
-    activeOrder.customer?._id ||
-    activeOrder.customer?.id ||
-    activeOrder.customerId ||
-    "cliente";
-  const customerName =
-    activeOrder.customer?.name || activeOrder.customerName || "Cliente";
 
   const openChatModal = () => {
     setUnreadCount(0);

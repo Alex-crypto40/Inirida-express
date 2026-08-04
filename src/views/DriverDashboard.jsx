@@ -1,8 +1,26 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import OrderChatModal from "../components/OrderChatModal";
 
 const API_URL =
   import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+
+// Auxiliar para validar si la orden es un servicio de pasajeros/motocarro
+const checkIsRide = (order) => {
+  if (!order) return false;
+  const type = (
+    order.serviceType ||
+    order.orderType ||
+    order.type ||
+    ""
+  ).toLowerCase();
+  return (
+    type === "ride" ||
+    type === "pasajero" ||
+    type === "taxi" ||
+    order.isRide === true ||
+    order.isMandado === true
+  );
+};
 
 export default function DriverDashboard() {
   const [driver, setDriver] = useState(() => {
@@ -22,6 +40,9 @@ export default function DriverDashboard() {
   // Estado para la contraoferta individual de cada orden disponible { [orderId]: monto }
   const [driverOffers, setDriverOffers] = useState({});
 
+  // Ref para rastrear que ofertas modificó manualmente el conductor y no pisarlas en el polling
+  const modifiedOffersRef = useRef({});
+
   // Incremento máximo permitido sobre la oferta del cliente
   const MAX_INCREMENT = 3000;
 
@@ -33,12 +54,13 @@ export default function DriverDashboard() {
         const data = await res.json();
         setAvailableOrders(data);
 
-        // Inicializar las ofertas propuestas por el conductor con el valor base de cada orden
+        // Inicializar las ofertas propuestas protegiendo las que el usuario ya modificó
         setDriverOffers((prev) => {
           const nextState = { ...prev };
           data.forEach((order) => {
-            if (!nextState[order._id]) {
-              nextState[order._id] = order.total || 4000;
+            const orderId = order._id || order.id;
+            if (!modifiedOffersRef.current[orderId] && !nextState[orderId]) {
+              nextState[orderId] = order.total || 4000;
             }
           });
           return nextState;
@@ -85,6 +107,7 @@ export default function DriverDashboard() {
 
   // Handler para ajustar el contador (- / +) respetando topes
   const handleAjustarTarifa = (orderId, delta, basePrice) => {
+    modifiedOffersRef.current[orderId] = true; // Marcar como modificada localmente
     setDriverOffers((prev) => {
       const currentVal = prev[orderId] || basePrice;
       const minPermitido = basePrice;
@@ -189,11 +212,7 @@ export default function DriverDashboard() {
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
 
-    // Verificar flexibilizadamente si la orden es de tipo Carrera/Pasajero
-    const isRide =
-      activeOrder.serviceType === "ride" ||
-      activeOrder.orderType === "ride" ||
-      activeOrder.type === "ride";
+    const isRide = checkIsRide(activeOrder);
 
     // Si NO es carrera (es paquete/tienda) y no ingresó el PIN, exigirlo
     if (!isRide && !inputPin.trim()) {
@@ -245,11 +264,7 @@ export default function DriverDashboard() {
   };
 
   // Determinar si la orden activa actual es de pasajeros
-  const isCurrentActiveRide =
-    activeOrder &&
-    (activeOrder.serviceType === "ride" ||
-      activeOrder.orderType === "ride" ||
-      activeOrder.type === "ride");
+  const isCurrentActiveRide = checkIsRide(activeOrder);
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-gray-50 p-4 pb-20">
@@ -435,11 +450,7 @@ export default function DriverDashboard() {
           ) : (
             <div className="space-y-3">
               {availableOrders.map((order) => {
-                const isRide =
-                  order.serviceType === "ride" ||
-                  order.orderType === "ride" ||
-                  order.type === "ride" ||
-                  order.isMandado;
+                const isRide = checkIsRide(order);
                 const clientPrice = order.total || 4000;
                 const currentProposed = driverOffers[order._id] || clientPrice;
                 const isModified = currentProposed !== clientPrice;
