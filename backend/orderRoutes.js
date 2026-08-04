@@ -9,6 +9,7 @@ import {
   sendCounterOffer,
   updateOrderStatus,
   rateOrder,
+  cancelOrder,
 } from "./orderController.js";
 
 const router = express.Router();
@@ -40,6 +41,9 @@ router.post("/:orderId/take", takeOrder);
 
 // Enviar contraoferta al cliente (Motocarros)
 router.post("/:orderId/counter-offer", sendCounterOffer);
+
+// 🚨 CANCELAR CARRERA / PEDIDO (Resuelve el error 404 de la primera imagen)
+router.patch("/:orderId/cancel", updateOrderStatus); // O usa cancelOrder si lo tienes separado
 
 // Actualizar estado del pedido (at_store, on_the_way, completed, cancelled)
 router.patch("/:orderId/status", updateOrderStatus);

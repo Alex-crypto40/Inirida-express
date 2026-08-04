@@ -21,7 +21,6 @@ export const createOrder = async (req, res) => {
       total,
     } = req.body;
 
-    // Generar PIN de confirmación para el cliente
     const deliveryPin = generateDeliveryPin();
 
     const newOrder = new Order({
@@ -37,17 +36,16 @@ export const createOrder = async (req, res) => {
       total: total || 0,
       deliveryPin,
       status: "pending_driver",
+      counterOffers: [],
     });
 
     await newOrder.save();
 
-    // Poblar datos de la tienda si aplica
     const populatedOrder = await Order.findById(newOrder._id).populate(
       "store",
       "name address phone",
     );
 
-    // 🔴 Socket.io: Notificar a todos los repartidores
     const io = req.app.get("io");
     if (io) {
       io.emit("order:created", populatedOrder);
@@ -93,7 +91,7 @@ export const getOrderMessages = async (req, res) => {
   }
 };
 
-// 4. Tomar una carrera (Primer domiciliario que da clic se la queda)
+// 4. Tomar una carrera
 export const takeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -103,7 +101,6 @@ export const takeOrder = async (req, res) => {
       return res.status(401).json({ message: "Repartidor no autenticado." });
     }
 
-    // Prevenir que un repartidor tome múltiples carreras activas
     const activeOrder = await Order.findOne({
       driver: driverId,
       status: { $in: ["assigned", "at_store", "on_the_way"] },
@@ -116,7 +113,6 @@ export const takeOrder = async (req, res) => {
       });
     }
 
-    // Asignación atómica (evita condiciones de carrera entre conductores)
     let order = await Order.findOneAndUpdate(
       { _id: orderId, status: "pending_driver" },
       { driver: driverId, status: "assigned" },
@@ -132,12 +128,9 @@ export const takeOrder = async (req, res) => {
       });
     }
 
-    // 🔴 Socket.io: Remover del pool global y avisar al cliente en tiempo real
     const io = req.app.get("io");
     if (io) {
       io.emit("order:taken", { orderId: order._id, driverId });
-
-      // Emitir en ambos formatos para garantizar que el frontend lo escuche
       io.to(`order_${order._id}`).emit("order:status_updated", order);
       io.to(`order_${order._id}`).emit("orderUpdated", order);
       io.emit("order_status_updated", order);
@@ -165,7 +158,6 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(400).json({ message: "Estado de servicio no válido." });
     }
 
-    // Se consulta la orden sin exigir conductor de entrada para soportar cancelación directa del cliente
     const order = await Order.findById(orderId).populate(
       "driver",
       "name phone vehicleType plateNumber",
@@ -177,7 +169,6 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // 💡 CANCELACIÓN: Si la solicitud se cancela, se permite procesarla y notificar a sockets
     if (status === "cancelled") {
       order.status = "cancelled";
       await order.save();
@@ -196,14 +187,12 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    // Para el resto de estados, verificar pertenencia del conductor asignado
     if (order.driver && order.driver._id.toString() !== driverId?.toString()) {
       return res.status(403).json({
         message: "No tienes permiso para actualizar esta solicitud.",
       });
     }
 
-    // Solo exigir PIN si el servicio NO es una carrera de pasajero ("ride")
     const isRide = order.serviceType === "ride";
 
     if (status === "completed" && !isRide) {
@@ -225,7 +214,6 @@ export const updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
-    // 🔴 Socket.io: Emitir cambio de estado
     const io = req.app.get("io");
     if (io) {
       io.to(`order_${order._id}`).emit("order:status_updated", order);
@@ -248,7 +236,7 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// 6. Enviar Contraoferta al Cliente
+// 6. Enviar Contraoferta al Cliente (Guarda en DB y Emite por Websocket)
 export const sendCounterOffer = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -258,26 +246,40 @@ export const sendCounterOffer = async (req, res) => {
       return res.status(400).json({ message: "Precio de propuesta inválido." });
     }
 
-    const order = await Order.findById(orderId);
+    const newOffer = {
+      driverId,
+      driverName: driverName || "Conductor Motocarro",
+      proposedPrice: Number(proposedPrice),
+      createdAt: new Date(),
+    };
+
+    // $push guarda la oferta directamente dentro de la orden en MongoDB
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      { $push: { counterOffers: newOffer } },
+      { new: true },
+    )
+      .populate("store", "name address phone")
+      .populate("driver", "name phone vehicleType plateNumber");
+
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
     }
 
-    // Emitir la contraoferta al cliente vía WebSockets
     const io = req.app.get("io");
     if (io) {
       io.to(`order_${orderId}`).emit("counter_offer_received", {
         orderId,
-        driverId,
-        driverName,
-        proposedPrice,
+        offer: newOffer,
+        order,
       });
+      io.to(`order_${orderId}`).emit("orderUpdated", order);
+      io.emit("order_status_updated", order);
     }
 
     res.json({
       message: "Contraoferta enviada con éxito al cliente 📲",
-      orderId,
-      proposedPrice,
+      order,
     });
   } catch (error) {
     console.error("Error al enviar contraoferta:", error);
@@ -285,7 +287,44 @@ export const sendCounterOffer = async (req, res) => {
   }
 };
 
-// 7. Calificar el servicio
+// 7. Cancelación explícita (Maneja las peticiones dirigidas a /:orderId/cancel)
+export const cancelOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findByIdAndUpdate(
+      orderId,
+      { status: "cancelled" },
+      { new: true },
+    )
+      .populate("store", "name address phone")
+      .populate("driver", "name phone vehicleType plateNumber");
+
+    if (!order) {
+      return res.status(404).json({ message: "Solicitud no encontrada." });
+    }
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`order_${order._id}`).emit("order:status_updated", order);
+      io.to(`order_${order._id}`).emit("orderUpdated", order);
+      io.emit("order_status_updated", order);
+      io.emit("order:cancelled", { orderId: order._id });
+    }
+
+    res.json({
+      message: "Carrera/Solicitud cancelada correctamente ❌",
+      order,
+    });
+  } catch (error) {
+    console.error("Error al cancelar la orden:", error);
+    res
+      .status(500)
+      .json({ message: "Error interno al cancelar la solicitud." });
+  }
+};
+
+// 8. Calificar el servicio
 export const rateOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -315,7 +354,7 @@ export const rateOrder = async (req, res) => {
   }
 };
 
-// 8. Obtener la carrera activa de un domiciliario
+// 9. Obtener la carrera activa de un domiciliario
 export const getActiveDriverOrder = async (req, res) => {
   try {
     const driverId = req.params.driverId || req.user?._id;
@@ -334,7 +373,7 @@ export const getActiveDriverOrder = async (req, res) => {
   }
 };
 
-// 9. Obtener los detalles / estado de un pedido por ID
+// 10. Obtener los detalles / estado de un pedido por ID
 export const getOrderById = async (req, res) => {
   try {
     const { orderId } = req.params;
