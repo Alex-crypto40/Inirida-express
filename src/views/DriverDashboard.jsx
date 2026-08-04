@@ -37,13 +37,9 @@ export default function DriverDashboard() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
-  // Estado para la contraoferta individual de cada orden disponible { [orderId]: monto }
   const [driverOffers, setDriverOffers] = useState({});
-
-  // Ref para rastrear que ofertas modificó manualmente el conductor y no pisarlas en el polling
   const modifiedOffersRef = useRef({});
 
-  // Incremento máximo permitido sobre la oferta del cliente
   const MAX_INCREMENT = 3000;
 
   // 1. Cargar pedidos disponibles
@@ -54,7 +50,6 @@ export default function DriverDashboard() {
         const data = await res.json();
         setAvailableOrders(data);
 
-        // Inicializar las ofertas propuestas protegiendo las que el usuario ya modificó
         setDriverOffers((prev) => {
           const nextState = { ...prev };
           data.forEach((order) => {
@@ -80,22 +75,24 @@ export default function DriverDashboard() {
         const data = await res.json();
         if (data.activeOrder) {
           setActiveOrder(data.activeOrder);
+        } else {
+          setActiveOrder(null);
         }
+      } else if (res.status === 404) {
+        setActiveOrder(null);
       }
     } catch (error) {
       console.error("Error al consultar orden activa:", error);
     }
   };
 
-  // 3. Control de Polling periódico cuando el conductor está En Línea (Unificado)
+  // 3. Control de Polling periódico
   useEffect(() => {
     let interval;
     if (driver.isOnline) {
-      // Primera ejecución
       checkActiveOrder();
       fetchAvailableOrders();
 
-      // Intervalo de refresco cada 4 segundos
       interval = setInterval(() => {
         fetchAvailableOrders();
       }, 4000);
@@ -105,9 +102,8 @@ export default function DriverDashboard() {
     return () => clearInterval(interval);
   }, [driver.isOnline, driver.id]);
 
-  // Handler para ajustar el contador (- / +) respetando topes
   const handleAjustarTarifa = (orderId, delta, basePrice) => {
-    modifiedOffersRef.current[orderId] = true; // Marcar como modificada localmente
+    modifiedOffersRef.current[orderId] = true;
     setDriverOffers((prev) => {
       const currentVal = prev[orderId] || basePrice;
       const minPermitido = basePrice;
@@ -145,7 +141,7 @@ export default function DriverDashboard() {
     }
   };
 
-  // 5. Tomar pedido al precio directo ofertado por el cliente
+  // 5. Tomar pedido
   const handleTakeOrder = async (orderId) => {
     setLoading(true);
     setMessage("");
@@ -173,7 +169,7 @@ export default function DriverDashboard() {
     }
   };
 
-  // 5B. Enviar Contraoferta al cliente (Flujo Inverso)
+  // 5B. Enviar Contraoferta
   const handleSendCounterOffer = async (orderId) => {
     const proposedPrice = driverOffers[orderId];
     if (!proposedPrice) return;
@@ -208,13 +204,12 @@ export default function DriverDashboard() {
     }
   };
 
-  // 6. Completar Pedido (Garantizar compatibilidad con 'ride' sin requerir PIN)
+  // 6. Completar Pedido
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
 
     const isRide = checkIsRide(activeOrder);
 
-    // Si NO es carrera (es paquete/tienda) y no ingresó el PIN, exigirlo
     if (!isRide && !inputPin.trim()) {
       alert("⚠️ Por favor ingresa el PIN de 4 dígitos del cliente.");
       return;
@@ -263,7 +258,6 @@ export default function DriverDashboard() {
     }
   };
 
-  // Determinar si la orden activa actual es de pasajeros
   const isCurrentActiveRide = checkIsRide(activeOrder);
 
   return (
@@ -388,247 +382,137 @@ export default function DriverDashboard() {
             </div>
           </div>
 
-          {/* MÓDULO DE FINALIZACIÓN SEGÚN TIPO DE SERVICIO */}
+          {/* MÓDULO DE FINALIZACIÓN */}
           {isCurrentActiveRide ? (
-            /* 🛺 FINALIZAR CARRERA DIRECTA (SIN PIN) */
             <button
               onClick={handleCompleteOrder}
               disabled={loading}
               className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-base shadow-md transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
             >
-              <span>{loading ? "Finalizando..." : "Finalizar Carrera"}</span>
-              <span>🏁</span>
+              <span>{loading ? "Finalizando..." : "Finalizar Carrera 💵"}</span>
             </button>
           ) : (
-            /* 📦 FINALIZAR CON PIN (MANDADOS / TIENDAS) */
-            <div className="bg-gray-50 p-4 rounded-xl border border-gray-200 space-y-3">
-              <label className="block text-xs font-bold text-gray-700 text-center">
-                🔐 Ingresa el PIN de 4 dígitos del cliente para entregar:
-              </label>
+            <div className="space-y-3 pt-2">
               <input
                 type="text"
-                maxLength="4"
-                placeholder="Ej: 4321"
+                placeholder="Ingresa PIN de 4 dígitos"
                 value={inputPin}
                 onChange={(e) => setInputPin(e.target.value)}
-                className="w-full text-center tracking-widest text-xl font-extrabold border border-gray-300 rounded-xl py-2 focus:ring-2 focus:ring-green-500 focus:outline-none bg-white"
+                maxLength={4}
+                className="w-full p-3 border border-gray-300 rounded-xl text-center font-mono text-lg tracking-widest focus:ring-2 focus:ring-orange-500 focus:outline-none"
               />
               <button
                 onClick={handleCompleteOrder}
                 disabled={loading}
-                className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-md transition-colors cursor-pointer"
+                className="w-full py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-sm shadow-md transition-all cursor-pointer active:scale-98"
               >
-                💵 Verificar PIN y Entregar Pedido
+                {loading ? "Verificando..." : "Completar Entrega 📦"}
               </button>
             </div>
           )}
         </div>
       ) : (
-        /* VISTA DE CARRERAS DISPONIBLES */
-        <div>
-          <h3 className="font-bold text-gray-800 mb-3 flex justify-between items-center text-sm">
-            <span>Solicitudes Disponibles</span>
-            <span className="bg-gray-200 text-gray-700 text-xs px-2 py-0.5 rounded-full font-bold">
-              {availableOrders.length}
-            </span>
+        /* LISTA DE CARRERAS DISPONIBLES */
+        <div className="space-y-4">
+          <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider">
+            Solicitudes Disponibles ({availableOrders.length})
           </h3>
 
-          {!driver.isOnline ? (
-            <div className="bg-white rounded-2xl p-8 text-center text-gray-400 border border-gray-100">
-              <p className="text-4xl mb-2">🛵</p>
-              <p className="text-sm font-semibold">
-                Ponte "En línea" para ver carreras y pedidos disponibles.
-              </p>
-            </div>
-          ) : availableOrders.length === 0 ? (
-            <div className="bg-white rounded-2xl p-8 text-center text-gray-400 border border-gray-100">
-              <p className="text-3xl mb-2">⏳</p>
-              <p className="text-xs font-medium">
-                Buscando nuevas solicitudes en tiempo real...
+          {availableOrders.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm">
+              <p className="text-3xl mb-2">🛺</p>
+              <p className="text-gray-500 font-medium text-sm">
+                No hay carreras ni pedidos pendientes en Inírida.
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {availableOrders.map((order) => {
-                const isRide = checkIsRide(order);
-                const clientPrice = order.total || 4000;
-                const currentProposed = driverOffers[order._id] || clientPrice;
-                const isModified = currentProposed !== clientPrice;
+            availableOrders.map((order) => {
+              const orderId = order._id || order.id;
+              const basePrice = order.total || 4000;
+              const currentOffer = driverOffers[orderId] || basePrice;
+              const isRide = checkIsRide(order);
 
-                return (
-                  <div
-                    key={order._id}
-                    className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-between space-y-3"
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span
-                          className={`inline-block text-[10px] font-extrabold px-2 py-0.5 rounded-md uppercase mb-1 ${
-                            isRide
-                              ? "bg-orange-100 text-orange-700"
-                              : "bg-blue-100 text-blue-700"
-                          }`}
-                        >
-                          {isRide ? "🛺 Motocarro" : "🛍️ Tienda"}
-                        </span>
-                        <h4 className="font-bold text-gray-800 text-sm">
-                          {isRide
-                            ? `Origen: ${
-                                order.customer?.address || "Zona Urbana"
-                              }`
-                            : order.store?.name || "Pedido de Comercio"}
-                        </h4>
-                        <p className="text-xs text-gray-500 font-medium">
-                          {isRide
-                            ? `${order.customer?.notes || ""}`
-                            : `📍 Entregar en: ${order.customer?.address}`}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[10px] text-gray-400 block font-medium">
-                          Oferta Cliente
-                        </span>
-                        <span className="font-extrabold text-gray-800 text-sm">
-                          ${clientPrice.toLocaleString()}
-                        </span>
-                      </div>
+              return (
+                <div
+                  key={orderId}
+                  className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3"
+                >
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
+                        {isRide ? "🛺 Carrera" : "📦 Pedido"}
+                      </span>
+                      <h4 className="font-bold text-gray-800 text-base mt-1">
+                        {isRide
+                          ? order.customer?.address || "Solicitud de Motocarro"
+                          : order.store?.name || "Comercio"}
+                      </h4>
                     </div>
-
-                    {/* Mostrar Badges visuales de la Carrera */}
-                    {order.rideDetails && (
-                      <div className="flex flex-wrap gap-1.5 my-1">
-                        <span className="bg-gray-100 text-gray-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                          👥 {order.rideDetails.passengersCount || 1} Pas.
-                        </span>
-                        {order.rideDetails.hasLuggage && (
-                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                            🧳 Maleta/Carga
-                          </span>
-                        )}
-                        {order.rideDetails.hasPets && (
-                          <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                            🐱 Mascota
-                          </span>
-                        )}
-                      </div>
-                    )}
-
-                    {/* CONTROLES DE TARIFA Y CONTRAOFERTA (SOLO PARA MOTOCARROS) */}
-                    {isRide && (
-                      <div className="pt-2 border-t border-gray-100 bg-orange-50/50 p-2.5 rounded-xl space-y-2">
-                        <div className="flex justify-between items-center">
-                          <span className="text-xs font-bold text-orange-900">
-                            Tu Propuesta:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleAjustarTarifa(
-                                  order._id,
-                                  -1000,
-                                  clientPrice,
-                                )
-                              }
-                              disabled={currentProposed <= clientPrice}
-                              className={`w-7 h-7 rounded-lg bg-white border border-orange-200 text-orange-700 font-bold text-sm flex items-center justify-center ${
-                                currentProposed <= clientPrice
-                                  ? "opacity-30 cursor-not-allowed"
-                                  : "hover:bg-orange-100 cursor-pointer"
-                              }`}
-                            >
-                              -
-                            </button>
-                            <span className="font-black text-orange-600 text-sm min-w-[65px] text-center">
-                              ${currentProposed.toLocaleString()}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleAjustarTarifa(
-                                  order._id,
-                                  1000,
-                                  clientPrice,
-                                )
-                              }
-                              disabled={
-                                currentProposed >= clientPrice + MAX_INCREMENT
-                              }
-                              className={`w-7 h-7 rounded-lg bg-orange-500 text-white font-bold text-sm flex items-center justify-center ${
-                                currentProposed >= clientPrice + MAX_INCREMENT
-                                  ? "opacity-30 cursor-not-allowed"
-                                  : "hover:bg-orange-600 cursor-pointer"
-                              }`}
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Botones de Acción */}
-                        <div className="grid grid-cols-2 gap-2 pt-1">
-                          <button
-                            onClick={() => handleTakeOrder(order._id)}
-                            disabled={loading}
-                            className="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-xl text-xs font-bold transition-all cursor-pointer truncate"
-                          >
-                            Aceptar ${clientPrice.toLocaleString()}
-                          </button>
-
-                          <button
-                            onClick={() =>
-                              isModified
-                                ? handleSendCounterOffer(order._id)
-                                : handleTakeOrder(order._id)
-                            }
-                            disabled={loading}
-                            className={`w-full py-2 rounded-xl text-xs font-bold transition-all cursor-pointer truncate ${
-                              isModified
-                                ? "bg-orange-500 hover:bg-orange-600 text-white shadow-xs"
-                                : "bg-gray-200 text-gray-500 hover:bg-gray-300"
-                            }`}
-                          >
-                            {isModified
-                              ? `Ofertar $${currentProposed.toLocaleString()}`
-                              : "Misma Oferta"}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* BANDERAS DE TIENDAS / PEDIDOS REGULARES */}
-                    {!isRide && (
-                      <div className="flex justify-between items-center pt-2 border-t border-gray-100">
-                        <span className="text-xs text-gray-400">
-                          Total Pedido:{" "}
-                          <strong className="text-gray-700">
-                            ${clientPrice.toLocaleString()} COP
-                          </strong>
-                        </span>
-                        <button
-                          onClick={() => handleTakeOrder(order._id)}
-                          disabled={loading}
-                          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold shadow-md active:scale-95 transition-transform cursor-pointer"
-                        >
-                          {loading ? "Tomando..." : "Tomar Pedido 📦"}
-                        </button>
-                      </div>
-                    )}
+                    <span className="text-lg font-black text-gray-900">
+                      ${basePrice.toLocaleString()}
+                    </span>
                   </div>
-                );
-              })}
-            </div>
+
+                  {/* Contraoferta opcional */}
+                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
+                    <span className="text-xs text-gray-500 font-medium">
+                      Proponer tarifa:
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAjustarTarifa(orderId, -500, basePrice)
+                        }
+                        className="w-7 h-7 bg-white border border-gray-300 rounded-lg font-bold text-gray-700 shadow-xs flex items-center justify-center active:bg-gray-100"
+                      >
+                        -
+                      </button>
+                      <span className="font-bold text-sm text-orange-600 min-w-[70px] text-center">
+                        ${currentOffer.toLocaleString()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleAjustarTarifa(orderId, 500, basePrice)
+                        }
+                        className="w-7 h-7 bg-white border border-gray-300 rounded-lg font-bold text-gray-700 shadow-xs flex items-center justify-center active:bg-gray-100"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      onClick={() => handleSendCounterOffer(orderId)}
+                      disabled={loading}
+                      className="py-2.5 bg-orange-100 hover:bg-orange-200 text-orange-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                    >
+                      Enviar Oferta 💬
+                    </button>
+                    <button
+                      onClick={() => handleTakeOrder(orderId)}
+                      disabled={loading}
+                      className="py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
+                    >
+                      Aceptar Directo 🤝
+                    </button>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       )}
 
-      {/* Modal del Chat */}
+      {/* Modal de Chat si aplica */}
       {activeChatOrder && (
         <OrderChatModal
           orderId={activeChatOrder._id}
           currentUserRole="driver"
           currentUserId={driver.id}
-          currentUserName={driver.name || "Domiciliario"}
+          currentUserName={driver.name}
           onClose={() => setActiveChatOrder(null)}
         />
       )}

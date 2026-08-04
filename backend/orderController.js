@@ -165,18 +165,45 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(400).json({ message: "Estado de servicio no válido." });
     }
 
-    const order = await Order.findOne({
-      _id: orderId,
-      driver: driverId,
-    }).populate("driver", "name phone vehicleType plateNumber");
+    // Se consulta la orden sin exigir conductor de entrada para soportar cancelación directa del cliente
+    const order = await Order.findById(orderId).populate(
+      "driver",
+      "name phone vehicleType plateNumber",
+    );
 
     if (!order) {
       return res.status(404).json({
-        message: "Solicitud no encontrada o no asignada a este repartidor.",
+        message: "Solicitud no encontrada.",
       });
     }
 
-    // 💡 AJUSTE CLAVE: Solo exigir PIN si el servicio NO es una carrera de pasajero ("ride")
+    // 💡 CANCELACIÓN: Si la solicitud se cancela, se permite procesarla y notificar a sockets
+    if (status === "cancelled") {
+      order.status = "cancelled";
+      await order.save();
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`order_${order._id}`).emit("order:status_updated", order);
+        io.to(`order_${order._id}`).emit("orderUpdated", order);
+        io.emit("order_status_updated", order);
+        io.emit("order:cancelled", { orderId: order._id });
+      }
+
+      return res.json({
+        message: "Carrera/Solicitud cancelada exitosamente ❌",
+        order,
+      });
+    }
+
+    // Para el resto de estados, verificar pertenencia del conductor asignado
+    if (order.driver && order.driver._id.toString() !== driverId?.toString()) {
+      return res.status(403).json({
+        message: "No tienes permiso para actualizar esta solicitud.",
+      });
+    }
+
+    // Solo exigir PIN si el servicio NO es una carrera de pasajero ("ride")
     const isRide = order.serviceType === "ride";
 
     if (status === "completed" && !isRide) {
@@ -198,7 +225,7 @@ export const updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
-    // 🔴 Socket.io: Emitir cambio de estado a las salas asociadas
+    // 🔴 Socket.io: Emitir cambio de estado
     const io = req.app.get("io");
     if (io) {
       io.to(`order_${order._id}`).emit("order:status_updated", order);
@@ -221,7 +248,7 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// 6. Enviar Contraoferta al Cliente (NUEVO)
+// 6. Enviar Contraoferta al Cliente
 export const sendCounterOffer = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -306,6 +333,7 @@ export const getActiveDriverOrder = async (req, res) => {
     res.status(500).json({ message: "Error al consultar la carrera activa." });
   }
 };
+
 // 9. Obtener los detalles / estado de un pedido por ID
 export const getOrderById = async (req, res) => {
   try {

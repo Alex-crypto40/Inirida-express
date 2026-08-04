@@ -42,7 +42,7 @@ export default function OrderStatusWidget({
       const targetCustomerId =
         customerIdProp || localStorage.getItem("userId") || "cliente";
 
-      // 🛑 VALIDACIÓN BLINDADA: Evita hacer fetch con valores inválidos o "undefined"
+      // 🛑 VALIDACIÓN BLINDADA: Evita hacer fetch con valores inválidos
       if (
         !storedOrderId ||
         storedOrderId === "undefined" ||
@@ -89,7 +89,7 @@ export default function OrderStatusWidget({
     recoverActiveOrder();
   }, [activeOrder, customerIdProp]);
 
-  // 3. Escuchar WebSockets (Actualizaciones de Orden + Mensajes del Chat + Contraofertas)
+  // 3. Escuchar WebSockets (Actualizaciones de Orden + Cancelación + Chat + Contraofertas)
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
@@ -120,10 +120,20 @@ export default function OrderStatusWidget({
             nextState.status === "cancelled"
           ) {
             localStorage.removeItem("activeOrderId");
+            return null;
           }
 
           return nextState;
         });
+      }
+    };
+
+    // Handler explícito para cancelaciones vía WebSocket
+    const handleOrderCancelled = (data) => {
+      const cancelledId = data?._id || data?.orderId || data?.id || data;
+      if (cancelledId === orderId) {
+        localStorage.removeItem("activeOrderId");
+        setActiveOrder(null);
       }
     };
 
@@ -152,10 +162,12 @@ export default function OrderStatusWidget({
       }
     };
 
-    // Subscripción de eventos
+    // Subscripción de eventos de orden
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
+    socket.on("orderCancelled", handleOrderCancelled);
+    socket.on("order:cancelled", handleOrderCancelled);
     socket.on("counter_offer_received", handleOrderUpdate);
     socket.on("counterOffer", handleOrderUpdate);
 
@@ -168,6 +180,8 @@ export default function OrderStatusWidget({
       socket.off("orderUpdated", handleOrderUpdate);
       socket.off("order_status_updated", handleOrderUpdate);
       socket.off("order:status_updated", handleOrderUpdate);
+      socket.off("orderCancelled", handleOrderCancelled);
+      socket.off("order:cancelled", handleOrderCancelled);
       socket.off("counter_offer_received", handleOrderUpdate);
       socket.off("counterOffer", handleOrderUpdate);
       socket.off("new_message", handleNewChatMessage);
@@ -179,7 +193,7 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
-  // Lógica de detección de contraofertas robusta
+  // Lógica de detección de contraofertas
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
     counterOffers.length > 0

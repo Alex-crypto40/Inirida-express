@@ -144,11 +144,9 @@ function MotocarroForm({ onOrderCreated }) {
     };
 
     try {
-      // ✅ Solución definitiva: Obtiene el dominio base y fuerza la inclusión de /api
       let envUrl =
         import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
 
-      // Limpia cualquier diagonal final y sufijos /api preexistentes
       let cleanUrl = envUrl.replace(/\/+$/, "").replace(/\/api$/, "");
       const targetEndpoint = `${cleanUrl}/api/orders`;
 
@@ -160,6 +158,13 @@ function MotocarroForm({ onOrderCreated }) {
 
       if (res.ok) {
         const data = await res.json();
+        const createdOrder = data.order || data;
+
+        // Guardar la referencia directa en localStorage
+        if (createdOrder && createdOrder._id) {
+          localStorage.setItem("activeOrderId", createdOrder._id);
+        }
+
         const msgExito = esAcuerdo
           ? "🛺 ¡Carrera solicitada! Acuerda la tarifa directamente en el chat..."
           : `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`;
@@ -167,7 +172,7 @@ function MotocarroForm({ onOrderCreated }) {
         alert(msgExito);
 
         if (onOrderCreated) {
-          onOrderCreated(data.order || data);
+          onOrderCreated(createdOrder);
         }
 
         // Limpiar formulario tras éxito
@@ -358,7 +363,7 @@ function MotocarroForm({ onOrderCreated }) {
           )}
         </div>
 
-        {/* Opciones Adicionales (Desplegable Minimalista) */}
+        {/* Opciones Adicionales */}
         <div className="border-t border-gray-100 pt-1">
           <button
             type="button"
@@ -434,7 +439,7 @@ function MotocarroForm({ onOrderCreated }) {
           )}
         </div>
 
-        {/* Botón Principal de Acción con Precio o Leyenda Directa */}
+        {/* Botón Principal de Acción */}
         <button
           type="submit"
           className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer active:scale-98 flex items-center justify-between px-4"
