@@ -31,6 +31,40 @@ const BASE_DOMAIN = IS_PROD
 const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
 
+// ----------------------------------------------------
+// HELPERS AUXILIARES DE GEOLOCALIZACIÓN
+// ----------------------------------------------------
+function distance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Radio de la Tierra en metros
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distancia en metros
+}
+
+function smoothPosition(prevPos, currentPos) {
+  if (!prevPos) return currentPos;
+  const factor = 0.3; // Factor de suavizado (0.3 posición actual, 0.7 anterior)
+  return {
+    lat: prevPos.lat + (currentPos.lat - prevPos.lat) * factor,
+    lng: prevPos.lng + (currentPos.lng - prevPos.lng) * factor,
+  };
+}
+
+function getDynamicInterval(speed) {
+  // Velocidad en m/s. Si se mueve rápido (> 5 m/s approx 18 km/h), actualiza más seguido (3s). Sino, cada 7s.
+  if (!speed || speed < 1.5) return 7000;
+  if (speed < 5) return 5000;
+  return 3000;
+}
+
 export default function DriverDashboard({ driver, onLogout }) {
   // Manejo unificado de ID buscando en las propiedades posibles o localStorage
   const driverId =
@@ -56,6 +90,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   const socketRef = useRef(null);
   const watchPositionId = useRef(null);
   const modifiedOffersRef = useRef(new Set());
+  const queueRef = useRef([]); // Buffer offline para ubicaciones
 
   // Helper para identificar si es carrera de pasajero
   const checkIsRide = (order) => {
@@ -82,6 +117,13 @@ export default function DriverDashboard({ driver, onLogout }) {
       console.log("Conectado exitosamente al servidor");
       if (driverId) {
         socketRef.current.emit("register_driver", driverId);
+      }
+      // Envía elementos encolados en offline si existen
+      if (queueRef.current.length > 0) {
+        queueRef.current.forEach((locationData) => {
+          socketRef.current.emit("update_driver_location", locationData);
+        });
+        queueRef.current = [];
       }
     });
 
@@ -450,6 +492,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={toggleOnlineStatus}
+            disabled={loading}
             className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
               isOnline
                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
