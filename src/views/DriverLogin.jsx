@@ -71,7 +71,7 @@ export default function DriverLogin() {
         body: JSON.stringify(
           isRegister
             ? payload
-            : { email: formData.email, password: formData.password },
+            : { email: formData.email, password: formData.password }
         ),
       });
 
@@ -82,9 +82,19 @@ export default function DriverLogin() {
           alert("Registro exitoso. Un administrador aprobará tu cuenta.");
           toggleRegisterMode();
         } else {
-          // Guardar en localStorage la sesión del domiciliario
-          localStorage.setItem("driverInfo", JSON.stringify(data.driver));
-          navigate("/driver");
+          // Extraer la información del conductor devuelta por la API
+          const driverData = data.driver || data;
+          const driverId = driverData._id || driverData.id || data.driverId;
+
+          if (driverId) {
+            // Guardar ID directo e información completa en localStorage
+            localStorage.setItem("driverId", driverId);
+            localStorage.setItem("driverInfo", JSON.stringify(driverData));
+            localStorage.setItem("driverData", JSON.stringify(driverData));
+            navigate("/driver");
+          } else {
+            alert("Respuesta del servidor inválida: No se recibió el ID del conductor.");
+          }
         }
       } else {
         alert(data.message || "Error al procesar la solicitud.");
@@ -103,7 +113,6 @@ export default function DriverLogin() {
             onClick={() => navigate(-1)}
             className="group flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-slate-100 hover:bg-orange-500 text-slate-700 hover:text-white font-bold text-xs shadow-sm hover:shadow-md hover:shadow-orange-200 transition-all duration-200 active:scale-95 cursor-pointer"
           >
-            {/* Flecha SVG Gruesa con animación de desplazamiento a la izquierda al hacer hover */}
             <svg
               className="w-4 h-4 stroke-[3.5] transition-transform duration-200 group-hover:-translate-x-1"
               fill="none"
