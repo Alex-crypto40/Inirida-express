@@ -124,61 +124,88 @@ export default function DriverDashboard({ driver, onLogout }) {
   // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN
   // ----------------------------------------------------
   useEffect(() => {
-    if (isOnline && "geolocation" in navigator) {
-      let lastSendTime = 0;
+    if (!isOnline || !("geolocation" in navigator)) return;
 
-      watchPositionId.current = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude, accuracy, heading, speed } =
-            position.coords;
+    let lastSendTime = 0;
+    let lastValidPosition = null;
 
-          // 🛡️ FILTRO DE PRECISIÓN: Si la precisión es peor a 150 metros (típico de ubicación por IP),
-          // ignoramos este disparo para evitar el salto repentino al centro de la ciudad.
-          if (accuracy > 150) {
-            console.warn(
-              `[GPS] Coordenada ignorada por baja precisión (${accuracy}m)`,
-            );
+    watchPositionId.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude, accuracy, heading, speed } =
+          position.coords;
+
+        const now = Date.now();
+
+        // 🔴 1. FILTRO DE PRECISIÓN
+        if (accuracy > 120) {
+          console.warn(`[GPS] Baja precisión (${accuracy}m)`);
+          return;
+        }
+
+        // 🔴 2. FILTRO ANTISALTO
+        if (lastValidPosition) {
+          const dist = distance(
+            lastValidPosition.lat,
+            lastValidPosition.lng,
+            latitude,
+            longitude,
+          );
+
+          if (dist > 200) {
+            console.warn("[GPS] Salto detectado, ignorado");
             return;
           }
+        }
 
-          setGeoError(null);
-          const now = Date.now();
+        // 🟢 3. SUAVIZADO
+        const smoothed = smoothPosition(lastValidPosition, {
+          lat: latitude,
+          lng: longitude,
+        });
 
-          if (now - lastSendTime < 8000) return;
-          lastSendTime = now;
+        lastValidPosition = smoothed;
 
-          const locationData = {
-            driverId,
-            driverName: driver?.name || "Motocarro Express",
-            phone: driver?.phone || "",
-            lat: latitude,
-            lng: longitude,
-            heading: heading || 0,
-            speed: speed || 0,
-            isAvailable: true,
-          };
+        // 🟢 4. FRECUENCIA DINÁMICA
+        const interval = getDynamicInterval(speed);
 
-          if (socketRef.current?.connected) {
-            socketRef.current.emit("update_driver_location", locationData);
-          }
-        },
-        (err) => {
-          console.warn("Aviso GPS:", err.message);
-          setGeoError("Buscando precisión GPS...");
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 30000,
-          maximumAge: 0, // 👈 Forzar a no usar caché vieja si se degrada
-        },
-      );
-    } else if (!isOnline && watchPositionId.current !== null) {
-      navigator.geolocation.clearWatch(watchPositionId.current);
-      watchPositionId.current = null;
-    }
+        if (now - lastSendTime < interval) return;
+        lastSendTime = now;
+
+        const locationData = {
+          driverId,
+          driverName: driver?.name || "Motocarro Express",
+          phone: driver?.phone || "",
+          lat: smoothed.lat,
+          lng: smoothed.lng,
+          heading: heading || 0,
+          speed: speed || 0,
+          accuracy,
+          timestamp: now,
+          isAvailable: true,
+        };
+
+        // 🟢 5. ENVÍO CON BUFFER OFFLINE
+        if (socketRef.current?.connected) {
+          socketRef.current.emit("update_driver_location", locationData);
+        } else {
+          queueRef.current.push(locationData);
+        }
+
+        setGeoError(null);
+      },
+      (err) => {
+        console.warn("GPS error:", err.message);
+        setGeoError("Señal GPS débil...");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 5000,
+      },
+    );
 
     return () => {
-      if (watchPositionId.current !== null) {
+      if (watchPositionId.current) {
         navigator.geolocation.clearWatch(watchPositionId.current);
       }
     };
