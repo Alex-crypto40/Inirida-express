@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import axios from "axios";
 import io from "socket.io-client";
 import {
   MapPin,
@@ -20,8 +19,17 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:5000";
+// Configuración de URLs dinámicas (Producción en Render / Desarrollo)
+const IS_PROD =
+  process.env.NODE_ENV === "production" ||
+  window.location.hostname !== "localhost";
+
+const BASE_DOMAIN = IS_PROD
+  ? "https://inirida-express.onrender.com"
+  : "http://localhost:5000";
+
+const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
 
 export default function DriverDashboard({ driver, onLogout }) {
   // Manejo unificado de ID para evitar fallos de compatibilidad Mongo (_id vs id)
@@ -55,7 +63,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   // ----------------------------------------------------
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
-      transports: ["websocket"],
+      transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
       reconnectionDelay: 2000,
     });
@@ -66,7 +74,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       }
     });
 
-    // Actualización de lista en tiempo real sin depender exclusivamente de polling
     socketRef.current.on("order_created", (newOrder) => {
       if (isOnline && !activeOrder) {
         setAvailableOrders((prev) => [
@@ -140,15 +147,15 @@ export default function DriverDashboard({ driver, onLogout }) {
   const fetchOrders = useCallback(async () => {
     if (!isOnline || activeOrder) return;
     try {
-      const res = await axios.get(`${API_URL}/orders/available`);
-      const orders = res.data || [];
+      const res = await fetch(`${API_URL}/orders/available`);
+      if (!res.ok) throw new Error("Error en la solicitud de pedidos");
+      const orders = await res.json();
 
-      setAvailableOrders(orders);
+      setAvailableOrders(orders || []);
 
-      // Prevenir sobrescribir tarifas ajustadas manualmente
       setCustomRates((prev) => {
         const updated = { ...prev };
-        orders.forEach((order) => {
+        (orders || []).forEach((order) => {
           const id = order._id || order.id;
           if (!modifiedOffersRef.current.has(id)) {
             updated[id] = order.offeredRate || order.deliveryFee || 0;
@@ -164,11 +171,10 @@ export default function DriverDashboard({ driver, onLogout }) {
   const checkActiveOrder = useCallback(async () => {
     if (!driverId) return;
     try {
-      const res = await axios.get(
-        `${API_URL}/orders/active/driver/${driverId}`,
-      );
-      if (res.data) {
-        setActiveOrder(res.data);
+      const res = await fetch(`${API_URL}/orders/active/driver/${driverId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setActiveOrder(data);
       }
     } catch (err) {
       console.error("Error al verificar orden activa:", err);
@@ -183,7 +189,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     let interval;
     if (isOnline && !activeOrder) {
       fetchOrders();
-      interval = setInterval(fetchOrders, 6000); // Polling relajado como respaldo
+      interval = setInterval(fetchOrders, 6000);
     }
     return () => clearInterval(interval);
   }, [isOnline, activeOrder, fetchOrders]);
@@ -195,9 +201,14 @@ export default function DriverDashboard({ driver, onLogout }) {
     setLoading(true);
     try {
       const newStatus = !isOnline;
-      await axios.put(`${API_URL}/drivers/${driverId}/status`, {
-        isOnline: newStatus,
+      const res = await fetch(`${API_URL}/drivers/${driverId}/status`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isOnline: newStatus }),
       });
+
+      if (!res.ok) throw new Error();
+
       setIsOnline(newStatus);
       if (!newStatus) setAvailableOrders([]);
     } catch (err) {
@@ -211,16 +222,23 @@ export default function DriverDashboard({ driver, onLogout }) {
     setLoading(true);
     try {
       const proposedRate = customRates[orderId];
-      const res = await axios.post(`${API_URL}/orders/${orderId}/accept`, {
-        driverId,
-        rate: proposedRate,
+      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driverId, rate: proposedRate }),
       });
-      setActiveOrder(res.data.order || res.data);
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Error al aceptar el pedido.");
+      }
+
+      setActiveOrder(data.order || data);
       setAvailableOrders([]);
     } catch (err) {
       alert(
-        err.response?.data?.message ||
-          "Error al aceptar el pedido. Tal vez ya fue tomado.",
+        err.message || "Error al aceptar el pedido. Tal vez ya fue tomado.",
       );
       fetchOrders();
     } finally {
@@ -241,17 +259,26 @@ export default function DriverDashboard({ driver, onLogout }) {
     setPinError("");
     try {
       const orderId = activeOrder._id || activeOrder.id;
-      await axios.post(`${API_URL}/orders/${orderId}/complete`, {
-        driverId,
-        pin: isRide ? null : completionPin,
+      const res = await fetch(`${API_URL}/orders/${orderId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverId,
+          pin: isRide ? null : completionPin,
+        }),
       });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "PIN incorrecto o fallo en servidor.");
+      }
+
       setActiveOrder(null);
       setCompletionPin("");
       fetchOrders();
     } catch (err) {
-      setPinError(
-        err.response?.data?.message || "PIN incorrecto o fallo en servidor.",
-      );
+      setPinError(err.message);
     } finally {
       setLoading(false);
     }
@@ -425,7 +452,11 @@ export default function DriverDashboard({ driver, onLogout }) {
                       chatMessages.map((m, idx) => (
                         <div
                           key={idx}
-                          className={`p-2 rounded-lg max-w-[80%] ${m.senderType === "driver" ? "bg-amber-500/20 text-amber-200 ml-auto" : "bg-slate-800 text-slate-200"}`}
+                          className={`p-2 rounded-lg max-w-[80%] ${
+                            m.senderType === "driver"
+                              ? "bg-amber-500/20 text-amber-200 ml-auto"
+                              : "bg-slate-800 text-slate-200"
+                          }`}
                         >
                           {m.text}
                         </div>
