@@ -1,8 +1,19 @@
-import { useState } from "react";
-import { useNavigate } from "react-router-dom"; // 👈 Importamos el enrutador de React
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+// Configuración de URLs dinámicas (Producción en Render / Desarrollo)
+const IS_PROD =
+  process.env.NODE_ENV === "production" ||
+  window.location.hostname !== "localhost";
+
+const BASE_DOMAIN = IS_PROD
+  ? "https://inirida-express.onrender.com"
+  : "http://localhost:5000";
+
+const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
 
 function Login() {
-  const navigate = useNavigate(); // 👈 Inicializamos la función de navegación
+  const navigate = useNavigate();
 
   // Estados para capturar las credenciales y manejo de errores
   const [email, setEmail] = useState("");
@@ -16,51 +27,61 @@ function Login() {
     setLoading(true);
 
     // Validación estricta en el cliente para campos vacíos
-    if (!email || !password) {
+    if (!email.trim() || !password.trim()) {
       setError("Por favor, llena todos los campos.");
       setLoading(false);
       return;
     }
 
     try {
-      // 👈 Actualizamos la URL con tu IP local para que cargue en el celular
-      const response = await fetch(
-        "http://192.168.1.245:5000/api/stores/login",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ email, password }),
+      // 🟢 Petición con URL dinámica para adaptarse a Render o Localhost automáticamente
+      const response = await fetch(`${API_URL}/stores/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        setError(data.message || "Error al iniciar sesión.");
+        setError(
+          data.message || "Error al iniciar sesión. Revisa tus credenciales.",
+        );
         setLoading(false);
         return;
       }
 
       // ¡LOGIN EXITOSO!
-      console.log("Aliado autenticado con éxito:", data.store);
+      const storeData = data.store || data;
+      const storeId = storeData._id || storeData.id;
 
-      // Guardamos la persistencia de la sesión en el navegador
-      // Asegúrate de que el backend devuelva el id de la tienda (MongoDB usa _id o id)
-      const storeId = data.store._id || data.store.id;
+      if (!storeId) {
+        throw new Error(
+          "Respuesta inválida del servidor: No se recibió el ID de la tienda.",
+        );
+      }
 
+      // Persistencia completa en localStorage
       localStorage.setItem("token_tienda", storeId);
-      localStorage.setItem("nombre_tienda", data.store.name);
+      localStorage.setItem(
+        "nombre_tienda",
+        storeData.name || storeData.nombre || "Aliado",
+      );
+      localStorage.setItem("storeData", JSON.stringify(storeData));
 
-      alert(`¡Bienvenido, aliado de ${data.store.name}!`);
-
-      // 👈 Redirección automática al panel de administración usando el ID de la tienda
+      // Redirección al panel de administración de la tienda
       navigate(`/admin/${storeId}`);
     } catch (err) {
-      console.error("Error de red en el cliente:", err);
+      console.error("Error de red o servidor:", err);
       setError(
-        "No hay conexión con el servidor. Verifica que tu Backend esté encendido.",
+        err.message.includes("Respuesta inválida")
+          ? err.message
+          : "No hay conexión con el servidor. Verifica que el Backend esté activo.",
       );
     } finally {
       setLoading(false);
@@ -83,7 +104,7 @@ function Login() {
 
         {/* Alerta de Error Dinámica */}
         {error && (
-          <div className="bg-red-50 text-red-600 text-xs p-3 rounded-xl font-semibold mb-4 text-center">
+          <div className="bg-red-50 text-red-600 text-xs p-3 rounded-xl font-semibold mb-4 text-center border border-red-200">
             ⚠️ {error}
           </div>
         )}
@@ -99,7 +120,8 @@ function Login() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="off"
-              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:bg-white transition-all"
+              required
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:bg-white transition-all text-gray-800"
               placeholder="ejemplo@restaurante.com"
             />
           </div>
@@ -113,7 +135,8 @@ function Login() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               autoComplete="new-password"
-              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:bg-white transition-all"
+              required
+              className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:bg-white transition-all text-gray-800"
               placeholder="••••••••"
             />
           </div>
@@ -121,9 +144,16 @@ function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold py-3 rounded-xl shadow-md shadow-orange-500/20 transition-all text-sm mt-2 disabled:bg-gray-400"
+            className="w-full bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold py-3 rounded-xl shadow-md shadow-orange-500/20 transition-all text-sm mt-2 disabled:bg-gray-400 flex justify-center items-center gap-2"
           >
-            {loading ? "Validando..." : "Iniciar Sesión 🚀"}
+            {loading ? (
+              <>
+                <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                <span>Validando...</span>
+              </>
+            ) : (
+              "Iniciar Sesión 🚀"
+            )}
           </button>
         </form>
 
@@ -133,6 +163,7 @@ function Login() {
             ¿Tu negocio o comercio aún no está en la plataforma?
           </p>
           <button
+            type="button"
             onClick={() => navigate("/register-store")}
             className="text-xs text-orange-500 font-bold hover:underline block mt-1 w-full text-center"
           >

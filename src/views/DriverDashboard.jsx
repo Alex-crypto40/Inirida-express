@@ -59,22 +59,51 @@ function smoothPosition(prevPos, currentPos) {
 }
 
 function getDynamicInterval(speed) {
-  // Velocidad en m/s. Si se mueve rápido (> 5 m/s approx 18 km/h), actualiza más seguido (3s). Sino, cada 7s.
   if (!speed || speed < 1.5) return 7000;
   if (speed < 5) return 5000;
   return 3000;
 }
 
 export default function DriverDashboard({ driver, onLogout }) {
+  // 🟢 Recuperar objeto respaldado en localStorage para persistencia al recargar
+  const savedDriverData = JSON.parse(
+    localStorage.getItem("driverData") || "{}",
+  );
+
   // Manejo unificado de ID buscando en las propiedades posibles o localStorage
   const driverId =
     driver?.id ||
     driver?._id ||
     driver?.driverId ||
+    savedDriverData?.id ||
+    savedDriverData?._id ||
     localStorage.getItem("driverId");
 
+  // 🟢 Obtener nombre dinámico del prop o de la memoria persistente
+  const driverName =
+    driver?.name ||
+    driver?.fullName ||
+    driver?.nombre ||
+    savedDriverData?.name ||
+    savedDriverData?.fullName ||
+    savedDriverData?.nombre ||
+    "Conductor";
+
+  // Respaldar objeto de datos cuando la prop 'driver' cambie/exista
+  useEffect(() => {
+    if (driver && Object.keys(driver).length > 0) {
+      localStorage.setItem("driverData", JSON.stringify(driver));
+      if (driver.id || driver._id) {
+        localStorage.setItem("driverId", driver.id || driver._id);
+      }
+    }
+  }, [driver]);
+
   const [isOnline, setIsOnline] = useState(
-    driver?.isAvailable || driver?.isOnline || false,
+    driver?.isAvailable ||
+      driver?.isOnline ||
+      savedDriverData?.isAvailable ||
+      false,
   );
   const [activeOrder, setActiveOrder] = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
@@ -104,13 +133,12 @@ export default function DriverDashboard({ driver, onLogout }) {
   // ----------------------------------------------------
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
-      // 1. Inicia por polling para asegurar entrega y luego escala
       transports: ["polling", "websocket"],
       reconnection: true,
-      reconnectionAttempts: Infinity, // No rendirse en zonas sin cobertura
-      reconnectionDelay: 3000, // Espera 3s entre intentos
-      reconnectionDelayMax: 10000, // Máximo 10s para no saturar la red
-      timeout: 20000, // Tiempo de espera amplio
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 3000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
 
     socketRef.current.on("connect", () => {
@@ -118,7 +146,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       if (driverId) {
         socketRef.current.emit("register_driver", driverId);
       }
-      // Envía elementos encolados en offline si existen
       if (queueRef.current.length > 0) {
         queueRef.current.forEach((locationData) => {
           socketRef.current.emit("update_driver_location", locationData);
@@ -148,7 +175,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       setChatMessages((prev) => [...prev, msg]);
     });
 
-    // Manejo de reconexión tras recuperar señal (bfcache o corte de torre)
     const handlePageShow = (event) => {
       if (socketRef.current && !socketRef.current.connected) {
         socketRef.current.connect();
@@ -178,13 +204,11 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         const now = Date.now();
 
-        // 🔴 1. FILTRO DE PRECISIÓN
         if (accuracy > 120) {
           console.warn(`[GPS] Baja precisión (${accuracy}m)`);
           return;
         }
 
-        // 🔴 2. FILTRO ANTISALTO
         if (lastValidPosition) {
           const dist = distance(
             lastValidPosition.lat,
@@ -199,7 +223,6 @@ export default function DriverDashboard({ driver, onLogout }) {
           }
         }
 
-        // 🟢 3. SUAVIZADO
         const smoothed = smoothPosition(lastValidPosition, {
           lat: latitude,
           lng: longitude,
@@ -207,7 +230,6 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         lastValidPosition = smoothed;
 
-        // 🟢 4. FRECUENCIA DINÁMICA
         const interval = getDynamicInterval(speed);
 
         if (now - lastSendTime < interval) return;
@@ -215,8 +237,8 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         const locationData = {
           driverId,
-          driverName: driver?.name || "Motocarro Express",
-          phone: driver?.phone || "",
+          driverName: driverName,
+          phone: driver?.phone || savedDriverData?.phone || "",
           lat: smoothed.lat,
           lng: smoothed.lng,
           heading: heading || 0,
@@ -226,7 +248,6 @@ export default function DriverDashboard({ driver, onLogout }) {
           isAvailable: true,
         };
 
-        // 🟢 5. ENVÍO CON BUFFER OFFLINE
         if (socketRef.current?.connected) {
           socketRef.current.emit("update_driver_location", locationData);
         } else {
@@ -251,7 +272,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         navigator.geolocation.clearWatch(watchPositionId.current);
       }
     };
-  }, [isOnline, driverId, driver]);
+  }, [isOnline, driverId, driver, driverName, savedDriverData]);
 
   // ----------------------------------------------------
   // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO
@@ -319,7 +340,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     const newStatus = !isOnline;
 
     try {
-      // Apunta exactamente a /drivers/:id/status
       const res = await fetch(`${API_URL}/drivers/${driverId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -482,8 +502,9 @@ export default function DriverDashboard({ driver, onLogout }) {
             <h1 className="font-bold text-sm sm:text-base leading-tight truncate">
               Inírida Express
             </h1>
-            <p className="text-[10px] sm:text-xs text-gray-400 leading-none">
-              Conductor
+            {/* 🟢 Muestra dinámicamente el nombre del conductor */}
+            <p className="text-[10px] sm:text-xs text-amber-400/90 font-medium leading-none truncate mt-0.5">
+              {driverName}
             </p>
           </div>
         </div>
@@ -500,7 +521,9 @@ export default function DriverDashboard({ driver, onLogout }) {
             }`}
           >
             <span
-              className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-400 animate-pulse" : "bg-gray-500"}`}
+              className={`w-2 h-2 rounded-full ${
+                isOnline ? "bg-emerald-400 animate-pulse" : "bg-gray-500"
+              }`}
             />
             <span className="whitespace-nowrap">
               {isOnline ? "En Línea" : "Off-line"}
