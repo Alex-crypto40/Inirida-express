@@ -5,17 +5,13 @@ import bcrypt from "bcrypt";
 export const getStores = async (req, res) => {
   try {
     const { category } = req.query;
-
     let filter = { status: "active" };
 
     if (category) {
       filter.category = category.toLowerCase().trim();
     }
 
-    // Excluimos la contraseña en las consultas públicas
-    const stores = await Store.find(filter)
-      .select("-password")
-      .sort({ createdAt: -1 });
+    const stores = await Store.find(filter).sort({ createdAt: -1 });
     res.json(stores);
   } catch (error) {
     console.error("Error al obtener las tiendas:", error);
@@ -23,11 +19,11 @@ export const getStores = async (req, res) => {
   }
 };
 
-// 2. OBTENER UNA TIENDA POR ID (Para cargar su perfil/menú en el frontend)
+// 2. OBTENER UNA TIENDA POR ID
 export const getStoreById = async (req, res) => {
   try {
     const { id } = req.params;
-    const store = await Store.findById(id).select("-password");
+    const store = await Store.findById(id);
 
     if (!store) {
       return res.status(404).json({ message: "Comercio no encontrado." });
@@ -45,8 +41,16 @@ export const getStoreById = async (req, res) => {
 // 3. CREAR TIENDA (Registro Público -> Estado "pending")
 export const createStore = async (req, res) => {
   try {
-    const { name, email, password, phone, category, image, whatsappNumber } =
-      req.body;
+    const {
+      name,
+      email,
+      password,
+      phone,
+      address,
+      category,
+      image,
+      whatsappNumber,
+    } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({
@@ -56,7 +60,6 @@ export const createStore = async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    // Verificar si el correo ya está registrado
     const existingStore = await Store.findOne({ email: cleanEmail });
     if (existingStore) {
       return res.status(400).json({
@@ -64,7 +67,6 @@ export const createStore = async (req, res) => {
       });
     }
 
-    // Encriptar contraseña
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
@@ -72,6 +74,7 @@ export const createStore = async (req, res) => {
       name: name.trim(),
       email: cleanEmail,
       password: hashedPassword,
+      address: address ? address.trim() : "",
       phone: phone ? phone.trim() : "",
       whatsappNumber: whatsappNumber ? whatsappNumber.trim() : "",
       category: category ? category.toLowerCase().trim() : "restaurante",
@@ -91,7 +94,7 @@ export const createStore = async (req, res) => {
   }
 };
 
-// 4. INICIO DE SESIÓN DE LA TIENDA
+// 4. INICIO DE SESIÓN DEL COMERCIO
 export const loginStore = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -104,7 +107,10 @@ export const loginStore = async (req, res) => {
 
     const cleanEmail = email.toLowerCase().trim();
 
-    const store = await Store.findOne({ email: cleanEmail });
+    // Requerimos explícitamente el password porque en el esquema tiene select: false
+    const store = await Store.findOne({ email: cleanEmail }).select(
+      "+password",
+    );
     if (!store) {
       return res.status(404).json({
         message: "El correo electrónico no está registrado.",
@@ -129,6 +135,7 @@ export const loginStore = async (req, res) => {
         id: store._id,
         name: store.name,
         email: store.email,
+        address: store.address,
         category: store.category,
         image: store.image,
         isOpen: store.isOpen,
@@ -137,5 +144,37 @@ export const loginStore = async (req, res) => {
   } catch (error) {
     console.error("Error en el login del comercio:", error);
     res.status(500).json({ message: "Error al procesar el inicio de sesión." });
+  }
+};
+
+// 5. CAMBIAR ESTADO ABIERTO / CERRADO (isOpen)
+export const toggleStoreOpen = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isOpen } = req.body;
+
+    if (typeof isOpen !== "boolean") {
+      return res
+        .status(400)
+        .json({ message: "El valor de apertura debe ser booleano." });
+    }
+
+    const updatedStore = await Store.findByIdAndUpdate(
+      id,
+      { isOpen },
+      { new: true },
+    );
+
+    if (!updatedStore) {
+      return res.status(404).json({ message: "Comercio no encontrado." });
+    }
+
+    res.json({
+      message: `Comercio ${isOpen ? "Abierto 🟢" : "Cerrado 🔴"}`,
+      isOpen: updatedStore.isOpen,
+    });
+  } catch (error) {
+    console.error("Error al cambiar estado del comercio:", error);
+    res.status(500).json({ message: "Error al actualizar la disponibilidad." });
   }
 };

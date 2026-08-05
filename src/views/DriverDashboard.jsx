@@ -1,612 +1,600 @@
-import React, { useState, useEffect, useRef } from "react";
-import OrderChatModal from "../components/OrderChatModal";
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import axios from "axios";
+import io from "socket.io-client";
+import {
+  MapPin,
+  Navigation,
+  DollarSign,
+  Package,
+  User,
+  CheckCircle2,
+  XCircle,
+  Send,
+  MessageSquare,
+  Phone,
+  AlertCircle,
+  RefreshCw,
+  Power,
+  ShieldCheck,
+  Clock,
+  ExternalLink,
+} from "lucide-react";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5000/api";
+const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || "http://localhost:5000";
 
-// Auxiliar para validar si la orden es un servicio de pasajeros/motocarro
-const checkIsRide = (order) => {
-  if (!order) return false;
-  const type = (
-    order.serviceType ||
-    order.orderType ||
-    order.type ||
-    ""
-  ).toLowerCase();
-  return (
-    type === "ride" ||
-    type === "pasajero" ||
-    type === "taxi" ||
-    order.isRide === true ||
-    order.isMandado === true
-  );
-};
+export default function DriverDashboard({ driver, onLogout }) {
+  // Manejo unificado de ID para evitar fallos de compatibilidad Mongo (_id vs id)
+  const driverId = driver?.id || driver?._id;
 
-export default function DriverDashboard({ socket }) {
-  const [driver, setDriver] = useState(() => {
-    const saved = localStorage.getItem("driverInfo");
-    return saved
-      ? JSON.parse(saved)
-      : { id: "", name: "Domiciliario", isOnline: false };
-  });
-
-  const [availableOrders, setAvailableOrders] = useState([]);
-  const [activeChatOrder, setActiveChatOrder] = useState(null);
+  const [isOnline, setIsOnline] = useState(driver?.isOnline || false);
   const [activeOrder, setActiveOrder] = useState(null);
-  const [inputPin, setInputPin] = useState("");
+  const [availableOrders, setAvailableOrders] = useState([]);
+  const [customRates, setCustomRates] = useState({});
+  const [chatMessages, setChatMessages] = useState([]);
+  const [newMessage, setNewMessage] = useState("");
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [completionPin, setCompletionPin] = useState("");
+  const [pinError, setPinError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [geoError, setGeoError] = useState(null);
 
-  const [driverOffers, setDriverOffers] = useState({});
-  const modifiedOffersRef = useRef({});
+  const socketRef = useRef(null);
+  const watchPositionId = useRef(null);
+  const modifiedOffersRef = useRef(new Set());
 
-  const MAX_INCREMENT = 3000;
+  // Helper para identificar si es carrera de pasajero
+  const checkIsRide = (order) => {
+    if (!order) return false;
+    const type = order.orderType || order.serviceType;
+    return type === "carrerita" || type === "pasajero" || type === "motocarro";
+  };
 
-  // 🛰️ EFECTO GPS: Rastreo en tiempo real mediante WebSockets cuando está En Línea
+  // ----------------------------------------------------
+  // 1. CONEXIÓN SOCKET Y EVENTOS EN TIEMPO REAL
+  // ----------------------------------------------------
   useEffect(() => {
-    let watchId;
-    const driverId = driver.id || driver._id;
+    socketRef.current = io(SOCKET_URL, {
+      transports: ["websocket"],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+    });
 
-    if (driver.isOnline && socket && driverId) {
-      if ("geolocation" in navigator) {
-        watchId = navigator.geolocation.watchPosition(
-          (position) => {
-            const { latitude, longitude } = position.coords;
-
-            // Transmitir coordenadas al servidor vía WebSocket
-            socket.emit("update_driver_location", {
-              driverId,
-              driverName: driver.name || "Conductor Motocarro",
-              lat: latitude,
-              lng: longitude,
-              isAvailable: true,
-            });
-          },
-          (error) => console.error("Error al obtener ubicación GPS:", error),
-          {
-            enableHighAccuracy: true,
-            timeout: 15000,
-            maximumAge: 10000,
-          },
-        );
+    socketRef.current.on("connect", () => {
+      if (driverId) {
+        socketRef.current.emit("register_driver", driverId);
       }
-    } else if (!driver.isOnline && socket && driverId) {
-      // Notificar al servidor que el conductor se desconectó del mapa
-      socket.emit("update_driver_location", {
-        driverId,
-        isAvailable: false,
-      });
+    });
+
+    // Actualización de lista en tiempo real sin depender exclusivamente de polling
+    socketRef.current.on("order_created", (newOrder) => {
+      if (isOnline && !activeOrder) {
+        setAvailableOrders((prev) => [
+          newOrder,
+          ...prev.filter(
+            (o) => (o._id || o.id) !== (newOrder._id || newOrder.id),
+          ),
+        ]);
+      }
+    });
+
+    socketRef.current.on("order_taken", (takenOrderId) => {
+      setAvailableOrders((prev) =>
+        prev.filter((o) => (o._id || o.id) !== takenOrderId),
+      );
+    });
+
+    socketRef.current.on("new_chat_message", (msg) => {
+      setChatMessages((prev) => [...prev, msg]);
+    });
+
+    return () => {
+      if (socketRef.current) socketRef.current.disconnect();
+    };
+  }, [driverId, isOnline, activeOrder]);
+
+  // ----------------------------------------------------
+  // 2. GEOLOCALIZACIÓN RESILIENTE CON CONTROL DE ERRORES
+  // ----------------------------------------------------
+  useEffect(() => {
+    if (isOnline && "geolocation" in navigator) {
+      watchPositionId.current = navigator.geolocation.watchPosition(
+        (position) => {
+          setGeoError(null);
+          const { latitude, longitude, heading, speed } = position.coords;
+          const locationData = {
+            driverId,
+            latitude,
+            longitude,
+            heading,
+            speed,
+          };
+
+          if (socketRef.current?.connected) {
+            socketRef.current.emit("update_driver_location", locationData);
+          }
+        },
+        (err) => {
+          console.warn("Error en GPS:", err.message);
+          setGeoError(
+            "Acceso a GPS limitado. Revisa los permisos del navegador.",
+          );
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+      );
+    } else if (!isOnline && watchPositionId.current !== null) {
+      navigator.geolocation.clearWatch(watchPositionId.current);
+      watchPositionId.current = null;
     }
 
     return () => {
-      if (watchId) navigator.geolocation.clearWatch(watchId);
+      if (watchPositionId.current !== null) {
+        navigator.geolocation.clearWatch(watchPositionId.current);
+      }
     };
-  }, [driver.isOnline, driver.id, driver.name, socket]);
+  }, [isOnline, driverId]);
 
-  // 1. Cargar pedidos disponibles
-  const fetchAvailableOrders = async () => {
+  // ----------------------------------------------------
+  // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO (POLLING FALLBACK)
+  // ----------------------------------------------------
+  const fetchOrders = useCallback(async () => {
+    if (!isOnline || activeOrder) return;
     try {
-      const res = await fetch(`${API_URL}/orders/available`);
-      if (res.ok) {
-        const data = await res.json();
-        setAvailableOrders(data);
+      const res = await axios.get(`${API_URL}/orders/available`);
+      const orders = res.data || [];
 
-        setDriverOffers((prev) => {
-          const nextState = { ...prev };
-          data.forEach((order) => {
-            const orderId = order._id || order.id;
-            if (!modifiedOffersRef.current[orderId] && !nextState[orderId]) {
-              nextState[orderId] = order.total || 4000;
-            }
-          });
-          return nextState;
+      setAvailableOrders(orders);
+
+      // Prevenir sobrescribir tarifas ajustadas manualmente
+      setCustomRates((prev) => {
+        const updated = { ...prev };
+        orders.forEach((order) => {
+          const id = order._id || order.id;
+          if (!modifiedOffersRef.current.has(id)) {
+            updated[id] = order.offeredRate || order.deliveryFee || 0;
+          }
         });
-      }
-    } catch (error) {
-      console.error("Error al cargar pedidos:", error);
+        return updated;
+      });
+    } catch (err) {
+      console.error("Error obteniendo pedidos disponibles:", err);
     }
-  };
+  }, [isOnline, activeOrder]);
 
-  // 2. Consultar si tiene una orden activa
-  const checkActiveOrder = async () => {
-    if (!driver?.id) return;
+  const checkActiveOrder = useCallback(async () => {
+    if (!driverId) return;
     try {
-      const res = await fetch(`${API_URL}/orders/driver/${driver.id}/active`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.activeOrder) {
-          setActiveOrder(data.activeOrder);
-        } else {
-          setActiveOrder(null);
-        }
-      } else if (res.status === 404) {
-        setActiveOrder(null);
+      const res = await axios.get(
+        `${API_URL}/orders/active/driver/${driverId}`,
+      );
+      if (res.data) {
+        setActiveOrder(res.data);
       }
-    } catch (error) {
-      console.error("Error al consultar orden activa:", error);
+    } catch (err) {
+      console.error("Error al verificar orden activa:", err);
     }
-  };
+  }, [driverId]);
 
-  // 3. Control de Polling periódico
+  useEffect(() => {
+    checkActiveOrder();
+  }, [checkActiveOrder]);
+
   useEffect(() => {
     let interval;
-    if (driver.isOnline) {
-      checkActiveOrder();
-      fetchAvailableOrders();
-
-      interval = setInterval(() => {
-        fetchAvailableOrders();
-      }, 4000);
-    } else {
-      setAvailableOrders([]);
+    if (isOnline && !activeOrder) {
+      fetchOrders();
+      interval = setInterval(fetchOrders, 6000); // Polling relajado como respaldo
     }
     return () => clearInterval(interval);
-  }, [driver.isOnline, driver.id]);
+  }, [isOnline, activeOrder, fetchOrders]);
 
-  const handleAjustarTarifa = (orderId, delta, basePrice) => {
-    modifiedOffersRef.current[orderId] = true;
-    setDriverOffers((prev) => {
-      const currentVal = prev[orderId] || basePrice;
-      const minPermitido = basePrice;
-      const maxPermitido = basePrice + MAX_INCREMENT;
+  // ----------------------------------------------------
+  // 4. ACCIONES DEL CONDUCTOR
+  // ----------------------------------------------------
+  const toggleOnlineStatus = async () => {
+    setLoading(true);
+    try {
+      const newStatus = !isOnline;
+      await axios.put(`${API_URL}/drivers/${driverId}/status`, {
+        isOnline: newStatus,
+      });
+      setIsOnline(newStatus);
+      if (!newStatus) setAvailableOrders([]);
+    } catch (err) {
+      alert("No se pudo cambiar el estado de conexión. Intenta de nuevo.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      const nuevoValor = Math.min(
-        maxPermitido,
-        Math.max(minPermitido, currentVal + delta),
+  const handleAcceptOrder = async (orderId) => {
+    setLoading(true);
+    try {
+      const proposedRate = customRates[orderId];
+      const res = await axios.post(`${API_URL}/orders/${orderId}/accept`, {
+        driverId,
+        rate: proposedRate,
+      });
+      setActiveOrder(res.data.order || res.data);
+      setAvailableOrders([]);
+    } catch (err) {
+      alert(
+        err.response?.data?.message ||
+          "Error al aceptar el pedido. Tal vez ya fue tomado.",
       );
-
-      return { ...prev, [orderId]: nuevoValor };
-    });
-  };
-
-  // 4. Cambiar estado En línea / Desconectado
-  const toggleOnline = async () => {
-    if (!driver.id) {
-      alert("Debes iniciar sesión como repartidor.");
-      return;
-    }
-    const newStatus = !driver.isOnline;
-    try {
-      const res = await fetch(`${API_URL}/drivers/${driver.id}/online`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isOnline: newStatus }),
-      });
-      if (res.ok) {
-        const updatedDriver = { ...driver, isOnline: newStatus };
-        setDriver(updatedDriver);
-        localStorage.setItem("driverInfo", JSON.stringify(updatedDriver));
-      }
-    } catch (error) {
-      alert("Error al cambiar de estado.");
-    }
-  };
-
-  // 5. Tomar pedido
-  const handleTakeOrder = async (orderId) => {
-    setLoading(true);
-    setMessage("");
-    try {
-      const res = await fetch(`${API_URL}/orders/${orderId}/take`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driverId: driver.id }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setActiveOrder(data.order);
-        setAvailableOrders((prev) => prev.filter((o) => o._id !== orderId));
-        setMessage("¡Carrera asignada con éxito! 🛵");
-      } else {
-        alert(data.message || "No se pudo tomar la carrera.");
-        fetchAvailableOrders();
-      }
-    } catch (error) {
-      alert("Error de conexión al intentar tomar la carrera.");
+      fetchOrders();
     } finally {
       setLoading(false);
     }
   };
 
-  // 5B. Enviar Contraoferta
-  const handleSendCounterOffer = async (orderId) => {
-    const proposedPrice = driverOffers[orderId];
-    if (!proposedPrice) return;
-
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/orders/${orderId}/counter-offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          driverId: driver.id,
-          driverName: driver.name || "Conductor Motocarro",
-          proposedPrice: Number(proposedPrice),
-        }),
-      });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setMessage(
-          `Oferta enviada por $${proposedPrice.toLocaleString()} COP. Esperando respuesta... ⏳`,
-        );
-        fetchAvailableOrders();
-      } else {
-        alert(data.message || "Error al enviar la propuesta.");
-      }
-    } catch (error) {
-      console.error("Error al enviar contraoferta:", error);
-      alert("Error al enviar la oferta al cliente.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 6. Completar Pedido
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
-
     const isRide = checkIsRide(activeOrder);
 
-    if (!isRide && !inputPin.trim()) {
-      alert("⚠️ Por favor ingresa el PIN de 4 dígitos del cliente.");
+    if (!isRide && completionPin.length !== 4) {
+      setPinError("Ingresa el PIN de 4 dígitos enviado al cliente.");
       return;
     }
 
     setLoading(true);
+    setPinError("");
     try {
-      const payload = {
-        status: "completed",
-        driverId: driver.id,
-      };
-
-      if (!isRide) {
-        payload.pin = inputPin.trim();
-      }
-
-      const res = await fetch(`${API_URL}/orders/${activeOrder._id}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+      const orderId = activeOrder._id || activeOrder.id;
+      await axios.post(`${API_URL}/orders/${orderId}/complete`, {
+        driverId,
+        pin: isRide ? null : completionPin,
       });
-
-      const data = await res.json();
-
-      if (res.ok) {
-        setActiveOrder(null);
-        setInputPin("");
-        setMessage(
-          isRide
-            ? "¡Carrera finalizada con éxito! 💵"
-            : "¡Entrega verificada y completada con éxito! 📦",
-        );
-        fetchAvailableOrders();
-      } else {
-        alert(
-          data.message ||
-            (isRide
-              ? "Error al finalizar la carrera."
-              : "PIN incorrecto o error al completar el pedido."),
-        );
-      }
-    } catch (error) {
-      alert("Error al conectar con el servidor.");
+      setActiveOrder(null);
+      setCompletionPin("");
+      fetchOrders();
+    } catch (err) {
+      setPinError(
+        err.response?.data?.message || "PIN incorrecto o fallo en servidor.",
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const isCurrentActiveRide = checkIsRide(activeOrder);
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !activeOrder) return;
 
+    const orderId = activeOrder._id || activeOrder.id;
+    const payload = {
+      orderId,
+      senderId: driverId,
+      senderType: "driver",
+      text: newMessage.trim(),
+      timestamp: new Date(),
+    };
+
+    socketRef.current?.emit("send_chat_message", payload);
+    setChatMessages((prev) => [...prev, payload]);
+    setNewMessage("");
+  };
+
+  const handleRateChange = (orderId, val) => {
+    const num = parseFloat(val) || 0;
+    modifiedOffersRef.current.add(orderId);
+    setCustomRates((prev) => ({ ...prev, [orderId]: num }));
+  };
+
+  // ----------------------------------------------------
+  // 5. RENDERIZADO
+  // ----------------------------------------------------
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-gray-50 p-4 pb-20">
-      {/* Encabezado del Domiciliario */}
-      <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 mb-4 flex justify-between items-center">
-        <div>
-          <h2 className="font-bold text-gray-800 text-lg">
-            Hola, {driver.name} 👋
-          </h2>
-          <p className="text-xs text-gray-500">
-            Estado:{" "}
-            <span
-              className={
-                driver.isOnline
-                  ? "text-green-600 font-semibold"
-                  : "text-red-500 font-semibold"
-              }
-            >
-              {driver.isOnline ? "En línea 🟢" : "Desconectado 🔴"}
-            </span>
-          </p>
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+      {/* Header */}
+      <header className="bg-slate-800 border-b border-slate-700 p-4 flex justify-between items-center sticky top-0 z-50">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+            <Navigation className="w-6 h-6" />
+          </div>
+          <div>
+            <h1 className="font-bold text-lg leading-tight">Inírida Express</h1>
+            <p className="text-xs text-slate-400">
+              {driver?.name || "Conductor"}
+            </p>
+          </div>
         </div>
-        <button
-          onClick={toggleOnline}
-          className={`px-4 py-2 rounded-xl text-sm font-bold transition-all cursor-pointer ${
-            driver.isOnline
-              ? "bg-red-100 text-red-600 hover:bg-red-200"
-              : "bg-green-500 text-white hover:bg-green-600 shadow-md"
-          }`}
-        >
-          {driver.isOnline ? "Desconectar" : "Conectarme"}
-        </button>
-      </div>
 
-      {message && (
-        <div className="bg-orange-100 text-orange-800 p-3 rounded-xl text-xs font-semibold mb-4 text-center">
-          {message}
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={toggleOnlineStatus}
+            disabled={loading}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition-all ${
+              isOnline
+                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30"
+                : "bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30"
+            }`}
+          >
+            <Power className="w-4 h-4" />
+            <span className="text-sm">
+              {isOnline ? "En Línea" : "Desconectado"}
+            </span>
+          </button>
+          <button
+            onClick={onLogout}
+            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700/50"
+          >
+            <XCircle className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* Alerta de GPS */}
+      {geoError && (
+        <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span>{geoError}</span>
         </div>
       )}
 
-      {/* VISTA DE CARRERA / PEDIDO ACTIVO */}
-      {activeOrder ? (
-        <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-orange-500 mb-6 space-y-4">
-          <div className="flex justify-between items-center pb-2 border-b border-gray-100">
-            <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full uppercase">
-              {isCurrentActiveRide ? "🛺 Carrera Activa" : "📦 Pedido en Curso"}
-            </span>
-            <span className="font-extrabold text-orange-600 text-xl">
-              ${activeOrder.total?.toLocaleString()}
-            </span>
-          </div>
-
-          {/* Badges de Detalles de Carrera */}
-          {isCurrentActiveRide && activeOrder.rideDetails && (
-            <div className="flex flex-wrap gap-2 p-2.5 bg-orange-50 rounded-xl border border-orange-100">
-              <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
-                👥 {activeOrder.rideDetails.passengersCount || 1} Pasajero(s)
-              </span>
-              {activeOrder.rideDetails.hasLuggage && (
-                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
-                  🧳 Con Carga/Maleta
+      <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
+        {/* VISTA 1: PEDIDO ACTIVO */}
+        {activeOrder ? (
+          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
+            <div className="flex justify-between items-start border-b border-slate-700 pb-3">
+              <div>
+                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20">
+                  {checkIsRide(activeOrder)
+                    ? "Carrera en Curso"
+                    : "Domicilio en Curso"}
                 </span>
-              )}
-              {activeOrder.rideDetails.hasPets && (
-                <span className="bg-white text-orange-900 text-xs font-bold px-2.5 py-1 rounded-lg border border-orange-200 shadow-xs">
-                  🐱 Con Mascota
-                </span>
-              )}
+                <h2 className="text-xl font-bold mt-2">
+                  {checkIsRide(activeOrder)
+                    ? "Servicio de Pasajero"
+                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(-4)}`}
+                </h2>
+              </div>
+              <a
+                href={`tel:${activeOrder.clientPhone}`}
+                className="p-3 bg-emerald-500/20 text-emerald-400 rounded-full hover:bg-emerald-500/30"
+              >
+                <Phone className="w-5 h-5" />
+              </a>
             </div>
-          )}
 
-          {/* 💬 Botón de Chat Directo */}
-          <button
-            onClick={() => setActiveChatOrder(activeOrder)}
-            className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm cursor-pointer"
-          >
-            <span>💬 Abrir Chat con Cliente / Comercio</span>
-            <span className="bg-blue-600 text-white text-[10px] px-2 py-0.5 rounded-full font-semibold">
-              En Vivo
-            </span>
-          </button>
+            {/* Rutas */}
+            <div className="space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
+              <div className="flex items-start space-x-3">
+                <MapPin className="w-5 h-5 text-emerald-400 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">Origen / Recogida</p>
+                  <p className="font-medium text-slate-200">
+                    {activeOrder.pickupAddress || activeOrder.origin}
+                  </p>
+                </div>
+              </div>
+              <div className="border-l-2 border-dashed border-slate-700 ml-2.5 h-4" />
+              <div className="flex items-start space-x-3">
+                <Navigation className="w-5 h-5 text-amber-400 mt-1 flex-shrink-0" />
+                <div>
+                  <p className="text-xs text-slate-400">Destino / Entrega</p>
+                  <p className="font-medium text-slate-200">
+                    {activeOrder.deliveryAddress || activeOrder.destination}
+                  </p>
+                </div>
+              </div>
+            </div>
 
-          <div className="space-y-3 text-sm text-gray-700">
-            {/* Información de Recogida / Comercio */}
-            <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-              <p className="text-xs text-gray-400 font-bold uppercase">
-                {isCurrentActiveRide
-                  ? "📍 Punto A (Recoger en)"
-                  : "🏪 Comercio / Tienda"}
-              </p>
-              <p className="font-bold text-gray-800">
-                {isCurrentActiveRide
-                  ? activeOrder.customer?.address || "Ubicación del cliente"
-                  : activeOrder.store?.name || "Comercio Aliado"}
-              </p>
-              {!isCurrentActiveRide && (
-                <p className="text-xs text-gray-500">
-                  📍 {activeOrder.store?.address || "Dirección del comercio"}
+            {/* Detalles del Cliente / Valor */}
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
+                <p className="text-xs text-slate-400">Cliente</p>
+                <p className="font-semibold">
+                  {activeOrder.clientName || "Usuario"}
                 </p>
-              )}
-            </div>
-
-            {/* Información del Cliente / Destino */}
-            <div className="bg-gray-50 p-3 rounded-xl border border-gray-100">
-              <p className="text-xs text-gray-400 font-bold uppercase">
-                {isCurrentActiveRide
-                  ? "🏁 Punto B (Destino / Pasajero)"
-                  : "👤 Cliente / Entrega"}
-              </p>
-              <p className="font-bold text-gray-800">
-                {activeOrder.customer?.name || "Cliente Inírida Express"}
-              </p>
-              <p className="text-xs text-gray-600 font-medium mt-0.5">
-                📞 {activeOrder.customer?.phone}
-              </p>
-              {activeOrder.customer?.notes && (
-                <p className="text-xs italic text-orange-600 mt-1 font-semibold">
-                  "{activeOrder.customer.notes}"
+              </div>
+              <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
+                <p className="text-xs text-slate-400">Valor Acordado</p>
+                <p className="font-bold text-emerald-400 text-base">
+                  $
+                  {(
+                    activeOrder.agreedRate ||
+                    activeOrder.totalAmount ||
+                    0
+                  ).toLocaleString()}{" "}
+                  COP
                 </p>
-              )}
+              </div>
             </div>
-          </div>
 
-          {/* MÓDULO DE FINALIZACIÓN */}
-          {isCurrentActiveRide ? (
-            <button
-              onClick={handleCompleteOrder}
-              disabled={loading}
-              className="w-full py-4 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-base shadow-md transition-all cursor-pointer active:scale-98 flex items-center justify-center gap-2"
-            >
-              <span>{loading ? "Finalizando..." : "Finalizar Carrera 💵"}</span>
-            </button>
-          ) : (
+            {/* Chat y Finalización */}
             <div className="space-y-3 pt-2">
-              <input
-                type="text"
-                placeholder="Ingresa PIN de 4 dígitos"
-                value={inputPin}
-                onChange={(e) => setInputPin(e.target.value)}
-                maxLength={4}
-                className="w-full p-3 border border-gray-300 rounded-xl text-center font-mono text-lg tracking-widest focus:ring-2 focus:ring-orange-500 focus:outline-none"
-              />
+              <button
+                onClick={() => setIsChatOpen(!isChatOpen)}
+                className="w-full py-2.5 bg-slate-700/50 hover:bg-slate-700 text-slate-200 rounded-xl font-medium flex items-center justify-center space-x-2 text-sm"
+              >
+                <MessageSquare className="w-4 h-4" />
+                <span>
+                  {isChatOpen ? "Ocultar Chat" : "Abrir Chat con Cliente"}
+                </span>
+              </button>
+
+              {isChatOpen && (
+                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 h-48 flex flex-col justify-between">
+                  <div className="overflow-y-auto space-y-2 mb-2 pr-1 text-xs">
+                    {chatMessages.length === 0 ? (
+                      <p className="text-slate-500 text-center py-4">
+                        No hay mensajes previos
+                      </p>
+                    ) : (
+                      chatMessages.map((m, idx) => (
+                        <div
+                          key={idx}
+                          className={`p-2 rounded-lg max-w-[80%] ${m.senderType === "driver" ? "bg-amber-500/20 text-amber-200 ml-auto" : "bg-slate-800 text-slate-200"}`}
+                        >
+                          {m.text}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                  <form onSubmit={handleSendMessage} className="flex space-x-2">
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={(e) => setNewMessage(e.target.value)}
+                      placeholder="Escribe un mensaje..."
+                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="p-2 bg-amber-500 text-slate-950 rounded-lg hover:bg-amber-400"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                    </button>
+                  </form>
+                </div>
+              )}
+
+              {/* Formulario de Finalización */}
+              {!checkIsRide(activeOrder) && (
+                <div className="space-y-1.5">
+                  <label className="text-xs text-slate-400 block">
+                    PIN de Entrega (Requerido para Comercios)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={completionPin}
+                    onChange={(e) =>
+                      setCompletionPin(e.target.value.replace(/\D/g, ""))
+                    }
+                    placeholder="0000"
+                    className="w-full text-center tracking-widest text-lg font-mono bg-slate-900 border border-slate-700 rounded-xl py-2 focus:border-amber-400 focus:outline-none"
+                  />
+                  {pinError && (
+                    <p className="text-xs text-rose-400 text-center">
+                      {pinError}
+                    </p>
+                  )}
+                </div>
+              )}
+
               <button
                 onClick={handleCompleteOrder}
                 disabled={loading}
-                className="w-full py-3.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded-xl text-sm shadow-md transition-all cursor-pointer active:scale-98"
+                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl transition-colors shadow-lg shadow-emerald-500/10 flex items-center justify-center space-x-2"
               >
-                {loading ? "Verificando..." : "Completar Entrega 📦"}
+                <CheckCircle2 className="w-5 h-5" />
+                <span>
+                  {checkIsRide(activeOrder)
+                    ? "Finalizar Carrera"
+                    : "Confirmar Entrega con PIN"}
+                </span>
               </button>
             </div>
-          )}
-        </div>
-      ) : (
-        /* LISTA DE CARRERAS DISPONIBLES */
-        <div className="space-y-4">
-          <h3 className="font-bold text-gray-700 text-sm uppercase tracking-wider">
-            Solicitudes Disponibles ({availableOrders.length})
-          </h3>
-
-          {availableOrders.length === 0 ? (
-            <div className="bg-white rounded-2xl p-8 text-center border border-gray-100 shadow-sm">
-              <p className="text-3xl mb-2">🛺</p>
-              <p className="text-gray-500 font-medium text-sm">
-                No hay carreras ni pedidos pendientes en Inírida.
-              </p>
+          </div>
+        ) : (
+          /* VISTA 2: LISTA DE PEDIDOS DISPONIBLES */
+          <div className="space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold text-slate-200">
+                Carreras y Pedidos Cerca
+              </h2>
+              <button
+                onClick={fetchOrders}
+                disabled={!isOnline || loading}
+                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 disabled:opacity-50"
+              >
+                <RefreshCw
+                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                />
+              </button>
             </div>
-          ) : (
-            availableOrders.map((order) => {
-              const orderId = order._id || order.id;
-              const basePrice = order.total || 4000;
-              const currentOffer = driverOffers[orderId] || basePrice;
-              const isRide = checkIsRide(order);
 
-              return (
-                <div
-                  key={orderId}
-                  className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3"
-                >
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <span className="bg-orange-100 text-orange-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">
-                        {isRide ? "🛺 Carrera" : "📦 Pedido"}
-                      </span>
-                      <h4 className="font-bold text-gray-800 text-base mt-1">
-                        {isRide
-                          ? order.customer?.address || "Solicitud de Motocarro"
-                          : order.store?.name || "Comercio"}
-                      </h4>
-                    </div>
-                    <span className="text-lg font-black text-gray-900">
-                      ${basePrice.toLocaleString()}
-                    </span>
-                  </div>
+            {!isOnline ? (
+              <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-8 text-center space-y-3">
+                <Power className="w-10 h-10 text-slate-500 mx-auto" />
+                <p className="text-slate-400 font-medium text-sm">
+                  Ponte en línea para recibir servicios en Inírida
+                </p>
+              </div>
+            ) : availableOrders.length === 0 ? (
+              <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-8 text-center space-y-2">
+                <Clock className="w-8 h-8 text-slate-600 mx-auto" />
+                <p className="text-slate-400 text-sm">
+                  No hay servicios disponibles en este momento
+                </p>
+              </div>
+            ) : (
+              availableOrders.map((order) => {
+                const id = order._id || order.id;
+                const isRide = checkIsRide(order);
 
-                  {/* Detalle visual de Ruta (Origen y Destino) para Carreras */}
-                  {isRide && (
-                    <div className="bg-gray-50 p-3 rounded-xl border border-gray-200/60 space-y-2 text-xs">
-                      <div className="flex items-start gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-green-500 mt-0.5 shrink-0" />
-                        <div>
-                          <span className="text-[10px] font-bold text-gray-400 block uppercase">
-                            Origen / Recogida
-                          </span>
-                          <span className="font-semibold text-gray-800">
-                            {order.customer?.address ||
-                              "Ubicación no especificada"}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start gap-2 pt-1 border-t border-gray-200/40">
-                        <span className="w-2.5 h-2.5 rounded-full bg-orange-500 mt-0.5 shrink-0" />
-                        <div>
-                          <span className="text-[10px] font-bold text-gray-400 block uppercase">
-                            Destino / Notas
-                          </span>
-                          <span className="font-semibold text-gray-800">
-                            {order.customer?.notes ||
-                              "Sin especificación de destino"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Indicadores Adicionales de la Carrera */}
-                  {isRide && order.rideDetails && (
-                    <div className="flex flex-wrap gap-1.5 text-[11px]">
-                      <span className="bg-gray-100 text-gray-700 px-2 py-0.5 rounded-md font-medium">
-                        👥 {order.rideDetails.passengersCount || 1} Pasajero(s)
-                      </span>
-                      {order.rideDetails.hasLuggage && (
-                        <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">
-                          🧳 Con Carga
-                        </span>
-                      )}
-                      {order.rideDetails.hasPets && (
-                        <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md font-medium">
-                          🐱 Con Mascota
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Contraoferta opcional */}
-                  <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-100 flex items-center justify-between">
-                    <span className="text-xs text-gray-500 font-medium">
-                      Proponer tarifa:
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          handleAjustarTarifa(orderId, -500, basePrice)
-                        }
-                        className="w-7 h-7 bg-white border border-gray-300 rounded-lg font-bold text-gray-700 shadow-xs flex items-center justify-center active:bg-gray-100"
+                return (
+                  <div
+                    key={id}
+                    className="bg-slate-800 border border-slate-700/80 rounded-2xl p-4 space-y-4 hover:border-slate-600 transition-colors"
+                  >
+                    <div className="flex justify-between items-start">
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full font-semibold border ${
+                          isRide
+                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
+                            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        }`}
                       >
-                        -
-                      </button>
-                      <span className="font-bold text-sm text-orange-600 min-w-[70px] text-center">
-                        ${currentOffer.toLocaleString()}
+                        {isRide ? "Carrera Pasajero" : "Domicilio / Comercio"}
                       </span>
+                      <span className="text-xs text-slate-400 font-mono">
+                        Sugerido: $
+                        {(
+                          order.offeredRate ||
+                          order.deliveryFee ||
+                          0
+                        ).toLocaleString()}{" "}
+                        COP
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-start space-x-2">
+                        <MapPin className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-slate-300">
+                          <span className="text-slate-500">De:</span>{" "}
+                          {order.pickupAddress || order.origin}
+                        </p>
+                      </div>
+                      <div className="flex items-start space-x-2">
+                        <Navigation className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
+                        <p className="text-slate-300">
+                          <span className="text-slate-500">A:</span>{" "}
+                          {order.deliveryAddress || order.destination}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Contraoferta de Tarifa */}
+                    <div className="pt-2 border-t border-slate-700/50 flex items-center space-x-3">
+                      <div className="flex-1 relative">
+                        <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="number"
+                          value={customRates[id] || ""}
+                          onChange={(e) => handleRateChange(id, e.target.value)}
+                          placeholder="Tu tarifa"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-sm font-semibold text-emerald-400 focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
                       <button
-                        type="button"
-                        onClick={() =>
-                          handleAjustarTarifa(orderId, 500, basePrice)
-                        }
-                        className="w-7 h-7 bg-white border border-gray-300 rounded-lg font-bold text-gray-700 shadow-xs flex items-center justify-center active:bg-gray-100"
+                        onClick={() => handleAcceptOrder(id)}
+                        disabled={loading}
+                        className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-sm transition-colors shadow-md shadow-amber-500/10"
                       >
-                        +
+                        Aceptar
                       </button>
                     </div>
                   </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      onClick={() => handleSendCounterOffer(orderId)}
-                      disabled={loading}
-                      className="py-2.5 bg-orange-100 hover:bg-orange-200 text-orange-800 font-bold text-xs rounded-xl transition-all cursor-pointer"
-                    >
-                      Enviar Oferta 💬
-                    </button>
-                    <button
-                      onClick={() => handleTakeOrder(orderId)}
-                      disabled={loading}
-                      className="py-2.5 bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
-                    >
-                      Aceptar Directo 🤝
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      )}
-
-      {/* Modal de Chat si aplica */}
-      {activeChatOrder && (
-        <OrderChatModal
-          orderId={activeChatOrder._id}
-          currentUserRole="driver"
-          currentUserId={driver.id}
-          currentUserName={driver.name}
-          onClose={() => setActiveChatOrder(null)}
-        />
-      )}
+                );
+              })
+            )}
+          </div>
+        )}
+      </main>
     </div>
   );
 }

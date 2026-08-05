@@ -4,6 +4,7 @@ import {
   getStoreById,
   createStore,
   loginStore,
+  toggleStoreOpen,
 } from "./storeController.js";
 
 const router = express.Router();
@@ -17,7 +18,11 @@ router.post("/register", createStore);
 // 3. Inicio de sesión del comercio
 router.post("/login", loginStore);
 
-// 4. Obtener detalle de un comercio por ID
+// 4. Cambiar estado de disponibilidad (Abierto/Cerrado)
+router.patch("/:id/open", toggleStoreOpen);
+router.put("/:id/open", toggleStoreOpen);
+
+// 5. Obtener detalle de un comercio por ID
 router.get("/:id", getStoreById);
 
 export default router;

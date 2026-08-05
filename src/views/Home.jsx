@@ -4,6 +4,7 @@ import { getStores } from "../services/api.js";
 import StoreCard from "../components/StoreCard";
 import MotocarroForm from "../components/MotocarroForm";
 import OrderStatusWidget from "../components/OrderStatusWidget";
+import MapView from "../components/MapView";
 
 function Home({ socket }) {
   const [stores, setStores] = useState([]);
@@ -11,7 +12,10 @@ function Home({ socket }) {
   const [busqueda, setBusqueda] = useState("");
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [categoriaSeleccionada, setCategoriaSeleccionada] =
-    useState("restaurante");
+    useState("motocarro");
+
+  // Estado para el conductor seleccionado desde MapView
+  const [selectedDriver, setSelectedDriver] = useState(null);
 
   // Estado para controlar la solicitud de motocarro / pedido activa
   const [activeOrder, setActiveOrder] = useState(null);
@@ -61,6 +65,7 @@ function Home({ socket }) {
     if (newOrder?._id) {
       localStorage.setItem("activeOrderId", newOrder._id);
       setActiveOrder(newOrder);
+      setSelectedDriver(null);
     }
   };
 
@@ -93,7 +98,7 @@ function Home({ socket }) {
       };
     }
 
-    // Polling de respaldo cada 4 segundos por si se interrumpe la conexión Socket
+    // Polling de respaldo cada 4 segundos
     const checkOrderStatus = async () => {
       try {
         const res = await fetch(`${API_URL}/orders/${activeOrder._id}`);
@@ -138,6 +143,8 @@ function Home({ socket }) {
 
   // 4. CARGA DE COMERCIOS SEGÚN CATEGORÍA
   useEffect(() => {
+    if (categoriaSeleccionada === "motocarro") return;
+
     setLoading(true);
     getStores(categoriaSeleccionada)
       .then((data) => {
@@ -315,15 +322,17 @@ function Home({ socket }) {
 
       {/* 3. CUERPO PRINCIPAL */}
       <div className="p-4 flex flex-col gap-4 flex-1 pb-24">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder={`🔍 Buscar en ${categoriaSeleccionada}...`}
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            className="w-full p-3 pl-4 rounded-xl bg-gray-100 border border-transparent text-sm focus:border-orange-500 focus:bg-white transition-all outline-none"
-          />
-        </div>
+        {categoriaSeleccionada !== "motocarro" && (
+          <div className="relative">
+            <input
+              type="text"
+              placeholder={`🔍 Buscar en ${categoriaSeleccionada}...`}
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              className="w-full p-3 pl-4 rounded-xl bg-gray-100 border border-transparent text-sm focus:border-orange-500 focus:bg-white transition-all outline-none"
+            />
+          </div>
+        )}
 
         {/* BARRA DE CATEGORÍAS */}
         <div className="w-full overflow-x-auto no-scrollbar py-1">
@@ -367,13 +376,29 @@ function Home({ socket }) {
             </span>
             <span className="text-[11px] bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-md">
               {categoriaSeleccionada === "motocarro"
-                ? "Solicitud directa"
+                ? "Mapa Radar Activo"
                 : `${comerciosFiltrados.length} opciones`}
             </span>
           </h2>
 
           {categoriaSeleccionada === "motocarro" ? (
-            <MotocarroForm onOrderCreated={handleOrderCreated} />
+            <div className="space-y-4">
+              {/* Mapa Radar interactivo */}
+              <div className="h-60 rounded-2xl overflow-hidden shadow-sm border border-gray-200 relative">
+                <MapView
+                  socket={socket}
+                  onSelectDriver={(driver) => setSelectedDriver(driver)}
+                />
+              </div>
+
+              {/* Formulario de carrera */}
+              <MotocarroForm
+                socket={socket}
+                selectedDriver={selectedDriver}
+                onClearSelectedDriver={() => setSelectedDriver(null)}
+                onOrderCreated={handleOrderCreated}
+              />
+            </div>
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-16 gap-3">
               <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>

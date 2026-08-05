@@ -77,36 +77,74 @@ const activeDriversLocations = new Map();
 io.on("connection", (socket) => {
   console.log(`⚡ Usuario conectado al WebSocket: ${socket.id}`);
 
-  // Transmitir ubicaciones activas al cliente recién conectado
+  // Enviar lista completa de motocarros disponibles inmediatamente al conectar
   socket.emit(
     "initial_drivers_locations",
+    Array.from(activeDriversLocations.values()),
+  );
+  socket.emit(
+    "drivers_online_list",
     Array.from(activeDriversLocations.values()),
   );
 
   // 🛰️ Evento: Actualización de posición GPS del conductor
   socket.on("update_driver_location", (data) => {
-    const { driverId, driverName, lat, lng, isAvailable } = data;
+    const {
+      driverId,
+      driverName,
+      phone,
+      vehicleType,
+      lat,
+      lng,
+      isAvailable,
+      heading,
+    } = data;
 
     if (!driverId || lat === undefined || lng === undefined) return;
 
-    if (isAvailable) {
+    if (isAvailable !== false) {
       const driverInfo = {
         driverId,
-        driverName,
-        lat,
-        lng,
+        driverName: driverName || "Motocarro Express",
+        phone: phone || "",
+        vehicleType: vehicleType || "motocarro",
+        lat: Number(lat),
+        lng: Number(lng),
+        heading: heading ? Number(heading) : 0,
         socketId: socket.id,
+        isAvailable: true,
         updatedAt: new Date(),
       };
 
       activeDriversLocations.set(driverId, driverInfo);
 
-      // Difundir la posición a todos los clientes conectados en la vista del mapa
+      // Difundir la posición a todos los mapas en vivo activos
       io.emit("driver_location_changed", driverInfo);
+      io.emit(
+        "drivers_online_list",
+        Array.from(activeDriversLocations.values()),
+      );
     } else {
-      // Si el conductor se deshabilita o entra en carrera ocupada, se remueve del mapa público
+      // Si se desactiva o toma carrera, se remueve del mapa público
       activeDriversLocations.delete(driverId);
       io.emit("driver_disconnected_location", { driverId });
+      io.emit(
+        "drivers_online_list",
+        Array.from(activeDriversLocations.values()),
+      );
+    }
+  });
+
+  // 🎯 Notificación de Solicitud Directa al Motocarro Seleccionado en el Mapa
+  socket.on("send_direct_order_request", (data) => {
+    const { targetDriverId, order } = data;
+    const targetDriver = activeDriversLocations.get(targetDriverId);
+
+    if (targetDriver && targetDriver.socketId) {
+      io.to(targetDriver.socketId).emit("direct_order_received", order);
+    } else {
+      // Si el conductor se desconectó, reenviar la orden al canal general
+      io.emit("order:created", order);
     }
   });
 
@@ -160,6 +198,10 @@ io.on("connection", (socket) => {
       if (info.socketId === socket.id) {
         activeDriversLocations.delete(driverId);
         io.emit("driver_disconnected_location", { driverId });
+        io.emit(
+          "drivers_online_list",
+          Array.from(activeDriversLocations.values()),
+        );
         break;
       }
     }

@@ -3,7 +3,8 @@ import mongoose from "mongoose";
 const storeSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
-    image: { type: String, default: "" }, // URL de foto de portada/logo
+    address: { type: String, default: "", trim: true }, // 👈 Requerido para populate en Orders
+    image: { type: String, default: "" },
 
     // 1. CREDENCIALES Y ACCESO
     email: {
@@ -16,6 +17,7 @@ const storeSchema = new mongoose.Schema(
     password: {
       type: String,
       required: true,
+      select: false, // 👈 Evita fugas del hash por defecto
     },
     status: {
       type: String,
@@ -41,9 +43,9 @@ const storeSchema = new mongoose.Schema(
 
     // 3. DATOS DE CONTACTO Y SERVICIOS
     phone: { type: String, trim: true, default: "" },
-    whatsappNumber: { type: String, trim: true, default: "" }, // Ej: "57310XXXXXXX"
-    priceRange: { type: String, default: "" }, // Ej: "$50.000 - $120.000 COP"
-    services: [{ type: String }], // Ej: ["Wi-Fi", "Aire Acondicionado"]
+    whatsappNumber: { type: String, trim: true, default: "" },
+    priceRange: { type: String, default: "" },
+    services: [{ type: String }],
 
     // 4. ESTADO DE OPERACIÓN
     deliveryTime: { type: String, default: "20-40 min" },
@@ -56,8 +58,6 @@ const storeSchema = new mongoose.Schema(
 /* ==========================================================================
    🚀 ÍNDICES DE RENDIMIENTO EN PRODUCCIÓN
    ========================================================================== */
-
-// 1. Permite filtrar tiendas activas por categoría ultrarrápidamente
 storeSchema.index({ status: 1, category: 1 });
 
 const Store = mongoose.models.Store || mongoose.model("Store", storeSchema);

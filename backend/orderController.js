@@ -126,7 +126,7 @@ export const takeOrder = async (req, res) => {
       { returnDocument: "after" },
     )
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber");
+      .populate("driver", "name phone vehicleType vehiclePlate");
 
     if (!order) {
       return res.status(409).json({
@@ -167,7 +167,7 @@ export const updateOrderStatus = async (req, res) => {
 
     const order = await Order.findById(orderId).populate(
       "driver",
-      "name phone vehicleType plateNumber",
+      "name phone vehicleType vehiclePlate",
     );
 
     if (!order) {
@@ -243,7 +243,7 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// 6. Enviar Contraoferta al Cliente (Guarda en DB y Emite por Websocket)
+// 6. Enviar Contraoferta al Cliente
 export const sendCounterOffer = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -266,7 +266,7 @@ export const sendCounterOffer = async (req, res) => {
       { new: true },
     )
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber");
+      .populate("driver", "name phone vehicleType vehiclePlate");
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
@@ -293,7 +293,7 @@ export const sendCounterOffer = async (req, res) => {
   }
 };
 
-// 7. Cancelación explícita (Maneja las peticiones dirigidas a /:orderId/cancel)
+// 7. Cancelación explícita
 export const cancelOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -304,7 +304,7 @@ export const cancelOrder = async (req, res) => {
       { new: true },
     )
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber");
+      .populate("driver", "name phone vehicleType vehiclePlate");
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
@@ -370,7 +370,7 @@ export const getActiveDriverOrder = async (req, res) => {
       status: { $in: ["assigned", "at_store", "on_the_way"] },
     })
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber");
+      .populate("driver", "name phone vehicleType vehiclePlate");
 
     res.json({ activeOrder: activeOrder || null });
   } catch (error) {
@@ -386,7 +386,7 @@ export const getOrderById = async (req, res) => {
 
     const order = await Order.findById(orderId)
       .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType plateNumber");
+      .populate("driver", "name phone vehicleType vehiclePlate");
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
@@ -399,7 +399,7 @@ export const getOrderById = async (req, res) => {
   }
 };
 
-// 11. NUEVO: Actualizar la ubicación GPS en vivo del mototaxista (Rastreo en Tiempo Real)
+// 11. Actualizar la ubicación GPS en vivo del mototaxista
 export const updateDriverLocation = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -428,7 +428,6 @@ export const updateDriverLocation = async (req, res) => {
       return res.status(404).json({ message: "Orden no encontrada." });
     }
 
-    // Emitir ubicación por WebSockets a las salas correspondientes
     const io = req.app.get("io");
     if (io) {
       const locationPayload = {

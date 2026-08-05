@@ -4,13 +4,13 @@ import L from "leaflet";
 
 // Icono personalizado para el Motocarro
 const motocarroIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/1048/1048314.png", // Icono provisional de motocarro
+  iconUrl: "https://cdn-icons-png.flaticon.com/512/1048/1048314.png",
   iconSize: [38, 38],
   iconAnchor: [19, 38],
   popupAnchor: [0, -38],
 });
 
-// Componente auxiliar para centrar suavemente el mapa si cambia la ubicación del cliente
+// Componente auxiliar para centrar suavemente el mapa
 function RecenterMap({ location }) {
   const map = useMap();
   useEffect(() => {
@@ -21,22 +21,32 @@ function RecenterMap({ location }) {
   return null;
 }
 
-export default function MapView({ socket, userLocation }) {
+export default function MapView({
+  socket,
+  userLocation,
+  onSelectDriver,
+  selectedDriverId,
+}) {
   const [drivers, setDrivers] = useState({});
 
   useEffect(() => {
     if (!socket) return;
 
-    // 1. Cargar las ubicaciones iniciales transmitidas por el backend al conectar
-    socket.on("initial_drivers_locations", (locationsArray) => {
+    const handleDriverList = (locationsArray) => {
       const initialMap = {};
       locationsArray.forEach((driver) => {
-        initialMap[driver.driverId] = driver;
+        if (driver.driverId) {
+          initialMap[driver.driverId] = driver;
+        }
       });
       setDrivers(initialMap);
-    });
+    };
 
-    // 2. Escuchar cambios de posición de los motocarros en tiempo real
+    // Escuchar lista inicial y actualizaciones globales
+    socket.on("initial_drivers_locations", handleDriverList);
+    socket.on("drivers_online_list", handleDriverList);
+
+    // Actualización de posición individual
     socket.on("driver_location_changed", (driverData) => {
       setDrivers((prev) => ({
         ...prev,
@@ -44,7 +54,7 @@ export default function MapView({ socket, userLocation }) {
       }));
     });
 
-    // 3. Remover del mapa al conductor si se desconecta o entra en carrera
+    // Remover al desconectarse
     socket.on("driver_disconnected_location", ({ driverId }) => {
       setDrivers((prev) => {
         const copy = { ...prev };
@@ -54,7 +64,8 @@ export default function MapView({ socket, userLocation }) {
     });
 
     return () => {
-      socket.off("initial_drivers_locations");
+      socket.off("initial_drivers_locations", handleDriverList);
+      socket.off("drivers_online_list", handleDriverList);
       socket.off("driver_location_changed");
       socket.off("driver_disconnected_location");
     };
@@ -88,7 +99,7 @@ export default function MapView({ socket, userLocation }) {
         {/* Marcador de la ubicación del Cliente */}
         {userLocation && (
           <Marker position={userLocation}>
-            <Popup>Tu ubicación actual</Popup>
+            <Popup>📍 Tu ubicación actual</Popup>
           </Marker>
         )}
 
@@ -98,11 +109,53 @@ export default function MapView({ socket, userLocation }) {
             key={driver.driverId}
             position={[driver.lat, driver.lng]}
             icon={motocarroIcon}
+            eventHandlers={{
+              click: () => {
+                if (onSelectDriver) {
+                  onSelectDriver(driver);
+                }
+              },
+            }}
           >
             <Popup>
-              <strong>{driver.driverName}</strong>
-              <br />
-              🛺 Motocarro Disponible
+              <div style={{ textAlign: "center", padding: "4px" }}>
+                <strong style={{ fontSize: "14px" }}>
+                  {driver.driverName || "Motocarro Express"}
+                </strong>
+                <br />
+                <span
+                  style={{
+                    fontSize: "12px",
+                    color: "#16a34a",
+                    fontWeight: "bold",
+                  }}
+                >
+                  🟢 En Línea y Disponible
+                </span>
+                {onSelectDriver && (
+                  <button
+                    onClick={() => onSelectDriver(driver)}
+                    style={{
+                      marginTop: "8px",
+                      width: "100%",
+                      backgroundColor:
+                        selectedDriverId === driver.driverId
+                          ? "#16a34a"
+                          : "#ea580c",
+                      color: "#ffffff",
+                      border: "none",
+                      borderRadius: "6px",
+                      padding: "6px 10px",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {selectedDriverId === driver.driverId
+                      ? "✓ Seleccionado"
+                      : "Pedir a este Motocarro 🛺"}
+                  </button>
+                )}
+              </div>
             </Popup>
           </Marker>
         ))}

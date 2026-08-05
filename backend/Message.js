@@ -38,10 +38,9 @@ const messageSchema = new mongoose.Schema(
 /* ==========================================================================
    🚀 ÍNDICE DE RENDIMIENTO PARA EL CHAT
    ========================================================================== */
-
-// Permite cargar e imprevistar el historial de mensajes de un pedido en tiempo récord
 messageSchema.index({ orderId: 1, createdAt: 1 });
 
-const Message = mongoose.model("Message", messageSchema);
+const Message =
+  mongoose.models.Message || mongoose.model("Message", messageSchema);
 
 export default Message;

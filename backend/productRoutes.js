@@ -14,8 +14,9 @@ router.get("/", getProducts);
 // Crear un producto
 router.post("/", createProduct);
 
-// Actualizar un producto existente
+// Actualizar un producto existente (Soporta PUT y PATCH)
 router.put("/:id", updateProduct);
+router.patch("/:id", updateProduct);
 
 // Eliminar un producto
 router.delete("/:id", deleteProduct);

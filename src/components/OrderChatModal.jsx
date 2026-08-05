@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-// Determinar la URL base dinámica usando VITE_API_URL sin el sufijo /api
-const RAW_API = import.meta.env.VITE_API_URL || "http://localhost:5000";
+const RAW_API = import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
 const BASE_URL = RAW_API.replace(/\/api\/?$/, "");
 
 const OrderChatModal = ({
   orderId,
   currentUserRole,
-  userType, // Fallback si se pasa como userType
+  userType,
   currentUserName,
   onClose,
 }) => {
@@ -42,19 +41,18 @@ const OrderChatModal = ({
   useEffect(() => {
     if (!orderId) return;
 
-    // 1. Cargar historial de mensajes previo desde el backend
+    // Fetch del historial de mensajes
     const fetchHistory = async () => {
       try {
         const response = await fetch(
-          `${BASE_URL}/api/orders/${orderId}/messages`,
+          `${BASE_URL}/api/orders/${orderId}/messages`
         );
         if (response.ok) {
           const data = await response.json();
           setMessages(Array.isArray(data) ? data : []);
         } else {
-          // Fallback a ruta legacy por compatibilidad
           const legacyRes = await fetch(
-            `${BASE_URL}/orders/${orderId}/messages`,
+            `${BASE_URL}/orders/${orderId}/messages`
           );
           if (legacyRes.ok) {
             const legacyData = await legacyRes.json();
@@ -68,28 +66,25 @@ const OrderChatModal = ({
 
     fetchHistory();
 
-    // 2. Conectar al servidor WebSocket con opciones de transporte robustas
+    // Conexión Socket.io
     socketRef.current = io(BASE_URL, {
       transports: ["websocket", "polling"],
       reconnectionAttempts: 5,
     });
 
-    // Unirse a las salas del pedido
     socketRef.current.emit("join_order_chat", orderId);
     socketRef.current.emit("join_order", `order_${orderId}`);
     socketRef.current.emit("join_order", orderId);
 
-    // Escuchar mensajes en tiempo real previniendo duplicados
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
-        // Verificar si existe duplicado estricto por ID o coincidencia exacta de texto y tiempo
         const isDuplicate = prev.some((m) => {
           if (m._id && newMessage._id && m._id === newMessage._id) return true;
           const sameText = m.text === newMessage.text;
           const sameRole = m.senderRole === newMessage.senderRole;
           const timeDiff = Math.abs(
             new Date(m.createdAt || Date.now()) -
-              new Date(newMessage.createdAt || Date.now()),
+              new Date(newMessage.createdAt || Date.now())
           );
           return sameText && sameRole && timeDiff < 2000;
         });
@@ -111,12 +106,10 @@ const OrderChatModal = ({
     };
   }, [orderId]);
 
-  // Auto-scroll al recibir o enviar mensajes
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Enviar mensaje
   const handleSendMessage = (e) => {
     e.preventDefault();
     const cleanText = text.trim();
@@ -125,16 +118,15 @@ const OrderChatModal = ({
     const messageData = {
       _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       orderId,
-      senderRole: role, // "driver" | "client" | "store"
+      senderRole: role,
       senderName: name,
       text: cleanText,
       createdAt: new Date().toISOString(),
     };
 
-    // 1. Actualización optimista local
+    // Actualización optimista
     setMessages((prev) => [...prev, messageData]);
 
-    // 2. Emitir mensaje por WebSockets al backend
     if (socketRef.current && socketRef.current.connected) {
       socketRef.current.emit("send_message", {
         orderId,
@@ -148,7 +140,6 @@ const OrderChatModal = ({
     setText("");
   };
 
-  // Asignar colores y badges según el rol
   const getRoleBadge = (senderRole) => {
     switch (senderRole) {
       case "store":
@@ -163,7 +154,6 @@ const OrderChatModal = ({
     }
   };
 
-  // Dar formato de hora legible (ej: 10:30 a. m.)
   const formatTime = (isoString) => {
     if (!isoString) return "";
     try {
@@ -181,13 +171,13 @@ const OrderChatModal = ({
     <div
       className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
       style={{ zIndex: 1060 }}
-      onClick={onClose} // Cerrar al tocar el fondo fuera de la caja
+      onClick={onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150"
-        onClick={(e) => e.stopPropagation()} // Prevenir cierre al hacer clic dentro
+        onClick={(e) => e.stopPropagation()}
       >
-        {/* Encabezado del Chat */}
+        {/* Encabezado */}
         <div className="bg-orange-500 text-white p-4 flex justify-between items-center shadow-md">
           <div>
             <h3 className="font-bold text-lg flex items-center gap-2">
@@ -206,7 +196,7 @@ const OrderChatModal = ({
           </button>
         </div>
 
-        {/* Lista de Mensajes */}
+        {/* Mensajes */}
         <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
           {messages.length === 0 ? (
             <div className="text-center text-gray-400 text-sm mt-10">
@@ -265,7 +255,7 @@ const OrderChatModal = ({
           <div ref={chatBottomRef} />
         </div>
 
-        {/* Formulario de Envío */}
+        {/* Input */}
         <form
           onSubmit={handleSendMessage}
           className="p-3 bg-white border-t border-gray-100 flex gap-2"

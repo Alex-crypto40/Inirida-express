@@ -116,8 +116,10 @@ export const loginDriver = async (req, res) => {
         email: driver.email,
         phone: driver.phone,
         vehicleType: driver.vehicleType,
+        vehiclePlate: driver.vehiclePlate, // 👈 Incluido para sincronización con frontend
         isOnline: driver.isOnline,
         rating: driver.rating,
+        completedDeliveries: driver.completedDeliveries || 0,
       },
     });
   } catch (error) {

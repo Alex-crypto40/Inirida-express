@@ -17,6 +17,7 @@ export default function OrderStatusWidget({
   const [unreadCount, setUnreadCount] = useState(0);
 
   const showChatRef = useRef(showChat);
+
   useEffect(() => {
     showChatRef.current = showChat;
     if (showChat) {
@@ -24,7 +25,7 @@ export default function OrderStatusWidget({
     }
   }, [showChat]);
 
-  // Guardar en localStorage cuando cambia la orden inicial
+  // Sincronizar estado cuando se recibe una nueva orden vía props
   useEffect(() => {
     if (initialOrder && initialOrder._id) {
       setActiveOrder(initialOrder);
@@ -32,7 +33,7 @@ export default function OrderStatusWidget({
     }
   }, [initialOrder]);
 
-  // Recuperación automática de orden activa
+  // Recuperación de orden activa al recargar
   useEffect(() => {
     if (activeOrder && activeOrder._id) return;
 
@@ -83,7 +84,7 @@ export default function OrderStatusWidget({
     recoverActiveOrder();
   }, [activeOrder, customerIdProp]);
 
-  // Escuchar Sockets en tiempo real
+  // Suscripción WebSocket
   useEffect(() => {
     const orderId = activeOrder?._id;
     if (!orderId) return;
@@ -147,12 +148,11 @@ export default function OrderStatusWidget({
           );
           audio.play().catch(() => {});
         } catch (e) {
-          console.warn("Audio error:", e);
+          console.warn("Audio play blocked:", e);
         }
       }
     };
 
-    // Suscripción a eventos
     socket.on("orderUpdated", handleOrderUpdate);
     socket.on("order_status_updated", handleOrderUpdate);
     socket.on("order:status_updated", handleOrderUpdate);
@@ -183,7 +183,7 @@ export default function OrderStatusWidget({
 
   if (!activeOrder) return null;
 
-  // Normalización de contraofertas y estado
+  // Lógica de datos de la carrera
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
     counterOffers.length > 0
@@ -239,12 +239,9 @@ export default function OrderStatusWidget({
   const origenAddress = activeOrder.customer?.address || "Ubicación cliente";
   const destinoNotes = activeOrder.customer?.notes || "";
 
-  // Handlers para acciones API
+  // Handlers
   const handleCancelOrder = async () => {
-    const confirmCancel = window.confirm(
-      "¿Estás seguro de que deseas cancelar la solicitud de motocarro?",
-    );
-    if (!confirmCancel) return;
+    if (!window.confirm("¿Deseas cancelar la solicitud de motocarro?")) return;
 
     setLoadingAction(true);
     try {
@@ -265,9 +262,10 @@ export default function OrderStatusWidget({
         const data = await res.json();
         alert(data.message || "No se pudo cancelar la carrera.");
       }
-    } catch (error) {
-      alert("Error de conexión al intentar cancelar.");
-    } finally {
+    } catch {
+      alert("Error de conexión al cancelar.");
+    }
+    fontFinally: {
       setLoadingAction(false);
     }
   };
@@ -294,8 +292,8 @@ export default function OrderStatusWidget({
       } else {
         alert(data.message || "No se pudo aceptar la contraoferta.");
       }
-    } catch (error) {
-      alert("Error de conexión al aceptar la propuesta.");
+    } catch {
+      alert("Error de conexión al aceptar oferta.");
     } finally {
       setLoadingAction(false);
     }
@@ -320,16 +318,11 @@ export default function OrderStatusWidget({
       } else {
         alert(data.message || "Error al rechazar la oferta.");
       }
-    } catch (error) {
-      alert("Error de conexión al rechazar la propuesta.");
+    } catch {
+      alert("Error de conexión al rechazar oferta.");
     } finally {
       setLoadingAction(false);
     }
-  };
-
-  const openChatModal = () => {
-    setUnreadCount(0);
-    setShowChat(true);
   };
 
   return (
@@ -366,7 +359,7 @@ export default function OrderStatusWidget({
           </span>
         </div>
 
-        {/* DETALLE VISUAL DE LA RUTA */}
+        {/* Detalle de ruta */}
         <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1 text-xs">
           <div className="flex items-center gap-1.5 text-gray-700">
             <span className="text-green-600 font-bold">📍 Origen:</span>
@@ -380,7 +373,7 @@ export default function OrderStatusWidget({
           )}
         </div>
 
-        {/* CONTRAOFERTA RECIBIDA */}
+        {/* Contraoferta */}
         {hasCounterOffer && activeCounterOffer && (
           <div className="my-2 p-3 bg-gradient-to-br from-orange-50 to-amber-50 rounded-2xl border-2 border-orange-400 text-center shadow-sm">
             <p className="text-xs text-orange-950 font-bold mb-1">
@@ -418,7 +411,7 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* BUSCANDO CONDUCTOR */}
+        {/* Esperando Conductor */}
         {isPending && (
           <div className="text-center my-2 space-y-2">
             <div className="flex items-center justify-center gap-2 bg-amber-50 py-2 px-3 rounded-xl border border-amber-200">
@@ -442,10 +435,10 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* CONDUCTOR EN CAMINO */}
+        {/* Conductor en camino */}
         {isAccepted && (
           <div className="space-y-3 mt-1">
-            {pinCode && activeOrder.serviceType !== "ride" && (
+            {pinCode && (
               <div className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl p-2.5 text-center shadow-sm">
                 <span className="text-[10px] font-bold uppercase tracking-wider block opacity-90">
                   Tu PIN de Seguridad
@@ -489,7 +482,10 @@ export default function OrderStatusWidget({
                     : "bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:opacity-95"
                 }`}
                 style={{ border: "none" }}
-                onClick={openChatModal}
+                onClick={() => {
+                  setUnreadCount(0);
+                  setShowChat(true);
+                }}
               >
                 <i className="bi bi-chat-dots-fill text-sm"></i>
                 <span>Abrir Chat App</span>
@@ -504,7 +500,7 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* CARRERA FINALIZADA */}
+        {/* Finalizada */}
         {isCompleted && (
           <div className="text-center my-2 p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
             <span className="text-xl">🎉</span>

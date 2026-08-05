@@ -59,7 +59,7 @@ export const createProduct = async (req, res) => {
   }
 };
 
-// 3. ACTUALIZAR PRODUCTO (Precio, disponibilidad, foto, etc.)
+// 3. ACTUALIZAR PRODUCTO (Soporta PUT y PATCH para cambio de precio o disponibilidad)
 export const updateProduct = async (req, res) => {
   try {
     const { id } = req.params;

@@ -1,6 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 
-function MotocarroForm({ onOrderCreated }) {
+function MotocarroForm({
+  socket,
+  selectedDriver,
+  onClearSelectedDriver,
+  onOrderCreated,
+}) {
   // 1. Cargar datos del cliente previamente guardados si existen
   const [telefono, setTelefono] = useState(
     () => localStorage.getItem("userPhone") || "",
@@ -88,17 +93,17 @@ function MotocarroForm({ onOrderCreated }) {
             data.address?.village;
 
           if (barrioOCalle) {
-            setOrigen(`📍 Ubicación GPS (${barrioOCalle}, Inírida)`);
+            setOrigen(`📍 GPS: ${barrioOCalle}, Inírida`);
           } else {
             setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
           }
-        } catch (error) {
+        } catch {
           setOrigen(`https://maps.google.com/?q=${latitude},${longitude}`);
         } finally {
           setLoadingGps(false);
         }
       },
-      (error) => {
+      () => {
         setLoadingGps(false);
         alert(
           "No se pudo obtener la ubicación. Asegúrate de activar los permisos de GPS en tu navegador.",
@@ -119,8 +124,9 @@ function MotocarroForm({ onOrderCreated }) {
 
     setSubmitting(true);
 
-    // Guardar datos de contacto localmente para futuras solicitudes
-    localStorage.setItem("userPhone", telefono.trim());
+    // Guardar datos de contacto localmente para autenticación persistente
+    const phoneClean = telefono.trim();
+    localStorage.setItem("userPhone", phoneClean);
     if (nombre.trim()) localStorage.setItem("userName", nombre.trim());
 
     const esAcuerdo = zona === "acuerdo";
@@ -130,6 +136,7 @@ function MotocarroForm({ onOrderCreated }) {
       serviceType: "ride",
       isMandado: false,
       store: null,
+      targetDriverId: selectedDriver ? selectedDriver.driverId : null,
       rideDetails: {
         passengersCount: Number(passengersCount),
         hasLuggage: Boolean(hasLuggage),
@@ -138,7 +145,7 @@ function MotocarroForm({ onOrderCreated }) {
       },
       customer: {
         name: nombre.trim() || "Cliente Motocarro",
-        phone: telefono.trim(),
+        phone: phoneClean,
         address: origen,
         notes: `Destino: ${destino}.${esAcuerdo ? " [Tarifa a convenir en Chat]" : ""}`,
       },
@@ -179,9 +186,19 @@ function MotocarroForm({ onOrderCreated }) {
           localStorage.setItem("activeOrderId", createdOrder._id);
         }
 
-        const msgExito = esAcuerdo
-          ? "🛺 ¡Carrera solicitada! Acuerda la tarifa directamente en el chat..."
-          : `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`;
+        // Si se seleccionó un motocarro directo en el mapa, transmitirle vía WebSocket
+        if (selectedDriver && socket) {
+          socket.emit("send_direct_order_request", {
+            targetDriverId: selectedDriver.driverId,
+            order: createdOrder,
+          });
+        }
+
+        const msgExito = selectedDriver
+          ? `🛺 Solicitud enviada directamente a ${selectedDriver.driverName || "Motocarro"}...`
+          : esAcuerdo
+            ? "🛺 ¡Carrera solicitada! Acuerda la tarifa directamente en el chat..."
+            : `🛺 ¡Carrera solicitada! Buscando motocarro por $${oferta.toLocaleString()} COP...`;
 
         alert(msgExito);
 
@@ -194,6 +211,7 @@ function MotocarroForm({ onOrderCreated }) {
         setDestino("");
         setComentarios("");
         setShowExtraOptions(false);
+        if (onClearSelectedDriver) onClearSelectedDriver();
       } else {
         alert(
           data.message || "Hubo un error al crear la solicitud en el servidor.",
@@ -219,10 +237,36 @@ function MotocarroForm({ onOrderCreated }) {
             <h3 className="font-extrabold text-sm text-gray-800">
               Pedir Carrera
             </h3>
-            <p className="text-[11px] text-gray-400">Solicitud rápida</p>
+            <p className="text-[11px] text-gray-400">
+              Solicitud rápida por Celular
+            </p>
           </div>
         </div>
       </div>
+
+      {/* Indicador de Motocarro Seleccionado en Mapa Radar */}
+      {selectedDriver && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🎯</span>
+            <div>
+              <p className="text-xs font-bold text-orange-900">
+                Seleccionado: {selectedDriver.driverName || "Motocarro Express"}
+              </p>
+              <p className="text-[10px] text-orange-700">
+                Solicitud directa prioritaria
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClearSelectedDriver}
+            className="text-xs text-orange-600 hover:text-orange-800 font-bold px-2 py-1 bg-white rounded-lg border border-orange-200"
+          >
+            Quitar
+          </button>
+        </div>
+      )}
 
       <form onSubmit={solicitarCarrera} className="space-y-3">
         {/* Teléfono y Nombre */}
@@ -320,7 +364,7 @@ function MotocarroForm({ onOrderCreated }) {
               onClick={() => handleSelectZona("urbana")}
               className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
                 zona === "urbana"
-                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
+                  ? "bg-orange-500 border-orange-500 text-white font-bold"
                   : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -333,7 +377,7 @@ function MotocarroForm({ onOrderCreated }) {
               onClick={() => handleSelectZona("coco")}
               className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
                 zona === "coco"
-                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
+                  ? "bg-orange-500 border-orange-500 text-white font-bold"
                   : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -346,7 +390,7 @@ function MotocarroForm({ onOrderCreated }) {
               onClick={() => handleSelectZona("aeropuerto")}
               className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
                 zona === "aeropuerto"
-                  ? "bg-orange-500 border-orange-500 text-white shadow-xs font-bold"
+                  ? "bg-orange-500 border-orange-500 text-white font-bold"
                   : "bg-gray-50 border-gray-200 text-gray-600 hover:bg-gray-100"
               }`}
             >
@@ -359,7 +403,7 @@ function MotocarroForm({ onOrderCreated }) {
               onClick={() => handleSelectZona("acuerdo")}
               className={`p-2 rounded-xl border text-center transition-all cursor-pointer ${
                 zona === "acuerdo"
-                  ? "bg-amber-500 border-amber-500 text-white shadow-xs font-bold"
+                  ? "bg-amber-500 border-amber-500 text-white font-bold"
                   : "bg-amber-50/60 border-amber-200 text-amber-800 hover:bg-amber-100/80"
               }`}
             >

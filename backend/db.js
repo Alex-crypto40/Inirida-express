@@ -2,22 +2,20 @@ import mongoose from "mongoose";
 
 const mongoURI = process.env.MONGO_URI;
 
-if (!mongoURI) {
-  console.error("❌ ERROR CRÍTICO: La variable MONGO_URI no está definida.");
-  process.exit(1);
-}
-
 const connectDB = async () => {
+  if (!mongoURI) {
+    console.error("❌ ERROR CRÍTICO: La variable MONGO_URI no está definida.");
+    process.exit(1);
+  }
+
   try {
-    await mongoose.connect(mongoURI);
-    console.log("🍃 Conexión exitosa a MongoDB");
+    const conn = await mongoose.connect(mongoURI);
+    console.log(`🍃 Conexión exitosa a MongoDB: ${conn.connection.host}`);
+    return conn;
   } catch (err) {
     console.error("❌ Error conectando a MongoDB:", err.message);
     process.exit(1);
   }
 };
-
-// ⚡ Llama a la función de conexión inmediatamente al importar el archivo
-connectDB();
 
 export default connectDB;

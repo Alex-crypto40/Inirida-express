@@ -36,7 +36,9 @@ const driverSchema = new mongoose.Schema(
       uppercase: true,
       validate: {
         validator: function (value) {
-          if (this.vehicleType !== "bicicleta") {
+          // Si this no está definido o el vehículo no es bicicleta, exige la placa
+          const type = this ? this.vehicleType : null;
+          if (type && type !== "bicicleta") {
             return Boolean(value && value.trim().length > 0);
           }
           return true;
@@ -45,7 +47,7 @@ const driverSchema = new mongoose.Schema(
           "La placa del vehículo es obligatoria para motos y motocarros.",
       },
       default: function () {
-        return this.vehicleType === "bicicleta" ? "N/A" : "";
+        return this && this.vehicleType === "bicicleta" ? "N/A" : "";
       },
     },
     status: {
@@ -60,6 +62,8 @@ const driverSchema = new mongoose.Schema(
     rating: {
       type: Number,
       default: 5.0,
+      min: 1,
+      max: 5,
     },
     totalRatings: {
       type: Number,
@@ -74,6 +78,9 @@ const driverSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Índice para búsquedas rápidas de conductores activos y en línea
+driverSchema.index({ status: 1, isOnline: 1 });
 
 const Driver = mongoose.model("Driver", driverSchema);
 

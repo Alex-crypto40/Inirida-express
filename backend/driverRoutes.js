@@ -25,7 +25,8 @@ router.post("/login", loginDriver);
 // Obtener perfil del repartidor
 router.get("/:id", getDriverProfile);
 
-// Cambiar disponibilidad (En línea 🟢 / Desconectado 🔴)
+// Cambiar disponibilidad (Soporta PUT y PATCH para mayor flexibilidad del cliente)
 router.patch("/:id/online", toggleOnlineStatus);
+router.put("/:id/online", toggleOnlineStatus);
 
 export default router;
