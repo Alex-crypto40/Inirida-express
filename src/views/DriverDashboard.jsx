@@ -121,7 +121,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   }, [driverId, isOnline, activeOrder]);
 
   // ----------------------------------------------------
-  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS
+  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN (GPS EXACTO)
   // ----------------------------------------------------
   useEffect(() => {
     if (isOnline && "geolocation" in navigator) {
@@ -132,9 +132,9 @@ export default function DriverDashboard({ driver, onLogout }) {
           setGeoError(null);
           const now = Date.now();
 
-          // Throttling: Enviar ubicación al servidor como máximo cada 10 segundos
-          // para no colapsar la conexión móvil de baja velocidad.
-          if (now - lastSendTime < 10000) return;
+          // Throttling: Enviar ubicación al servidor como máximo cada 8 segundos
+          // para optimizar el ancho de banda sin perder actualización constante.
+          if (now - lastSendTime < 8000) return;
           lastSendTime = now;
 
           const { latitude, longitude, heading, speed } = position.coords;
@@ -156,12 +156,12 @@ export default function DriverDashboard({ driver, onLogout }) {
         (err) => {
           console.warn("Aviso GPS:", err.message);
           // Muestra una advertencia leve sin interrumpir la operación del conductor
-          setGeoError("Buscando señal GPS estable...");
+          setGeoError("Buscando precisión GPS...");
         },
         {
-          enableHighAccuracy: false, // Menos exigente pero funciona con señal débil
-          timeout: 30000, // Espera 30 segundos antes de dar timeout
-          maximumAge: 15000, // Acepta coordenadas recientes guardadas en caché
+          enableHighAccuracy: true, // Obligatorio para usar el chip GPS real (Coordenadas exactas en Coco Nuevo)
+          timeout: 30000, // Espera 30 segundos de margen para fijar satélites en conexiones lentas
+          maximumAge: 5000, // Acepta datos con máximo 5s de antigüedad para mantener la posición real
         },
       );
     } else if (!isOnline && watchPositionId.current !== null) {
