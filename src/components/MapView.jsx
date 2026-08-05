@@ -82,12 +82,27 @@ export default function MapView({
         borderRadius: "16px",
         overflow: "hidden",
         boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+        position: "relative",
+        zIndex: 0, // Fuerza un nuevo stacking context en el nivel base
       }}
     >
+      {/* Estilos inyectados para forzar a Leaflet a staying debajo de los menús */}
+      <style>{`
+        .leaflet-container {
+          z-index: 1 !important;
+        }
+        .leaflet-pane {
+          z-index: 1 !important;
+        }
+        .leaflet-top, .leaflet-bottom {
+          z-index: 2 !important;
+        }
+      `}</style>
+
       <MapContainer
         center={center}
         zoom={15}
-        style={{ height: "100%", width: "100%" }}
+        style={{ height: "100%", width: "100%", zIndex: 1 }}
       >
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a>'

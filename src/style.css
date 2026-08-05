@@ -39,3 +39,6 @@ body {
 .carrusel-categorias:active {
   animation-play-state: paused;
 }
+.leaflet-container {
+  z-index: 1 !important;
+}
