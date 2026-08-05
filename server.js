@@ -14,7 +14,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 3. Importaciones locales
-import "./backend/db.js";
+import connectDB from "./backend/db.js";
 import storeRoutes from "./backend/storeRoutes.js";
 import productRoutes from "./backend/productRoutes.js";
 import driverRoutes from "./backend/driverRoutes.js";
@@ -228,6 +228,17 @@ app.get(/(.*)/, (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`🚀 Servidor con WebSockets y GPS activo en puerto ${PORT}`);
-});
+// Inicializamos primero la base de datos y luego el servidor
+const startServer = async () => {
+  try {
+    await connectDB(); // 👈 Esperamos a que la conexión a MongoDB esté lista
+
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Servidor con WebSockets y GPS activo en puerto ${PORT}`);
+    });
+  } catch (error) {
+    console.error("❌ Fallo crítico al iniciar el servidor:", error);
+  }
+};
+
+startServer();
