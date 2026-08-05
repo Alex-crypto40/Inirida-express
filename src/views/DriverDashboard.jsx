@@ -121,7 +121,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   }, [driverId, isOnline, activeOrder]);
 
   // ----------------------------------------------------
-  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN (GPS EXACTO)
+  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN
   // ----------------------------------------------------
   useEffect(() => {
     if (isOnline && "geolocation" in navigator) {
@@ -129,15 +129,24 @@ export default function DriverDashboard({ driver, onLogout }) {
 
       watchPositionId.current = navigator.geolocation.watchPosition(
         (position) => {
+          const { latitude, longitude, accuracy, heading, speed } =
+            position.coords;
+
+          // 🛡️ FILTRO DE PRECISIÓN: Si la precisión es peor a 150 metros (típico de ubicación por IP),
+          // ignoramos este disparo para evitar el salto repentino al centro de la ciudad.
+          if (accuracy > 150) {
+            console.warn(
+              `[GPS] Coordenada ignorada por baja precisión (${accuracy}m)`,
+            );
+            return;
+          }
+
           setGeoError(null);
           const now = Date.now();
 
-          // Throttling: Enviar ubicación al servidor como máximo cada 8 segundos
-          // para optimizar el ancho de banda sin perder actualización constante.
           if (now - lastSendTime < 8000) return;
           lastSendTime = now;
 
-          const { latitude, longitude, heading, speed } = position.coords;
           const locationData = {
             driverId,
             driverName: driver?.name || "Motocarro Express",
@@ -155,13 +164,12 @@ export default function DriverDashboard({ driver, onLogout }) {
         },
         (err) => {
           console.warn("Aviso GPS:", err.message);
-          // Muestra una advertencia leve sin interrumpir la operación del conductor
           setGeoError("Buscando precisión GPS...");
         },
         {
-          enableHighAccuracy: true, // Obligatorio para usar el chip GPS real (Coordenadas exactas en Coco Nuevo)
-          timeout: 30000, // Espera 30 segundos de margen para fijar satélites en conexiones lentas
-          maximumAge: 5000, // Acepta datos con máximo 5s de antigüedad para mantener la posición real
+          enableHighAccuracy: true,
+          timeout: 30000,
+          maximumAge: 0, // 👈 Forzar a no usar caché vieja si se degrada
         },
       );
     } else if (!isOnline && watchPositionId.current !== null) {
