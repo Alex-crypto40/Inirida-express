@@ -32,10 +32,16 @@ const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
 
 export default function DriverDashboard({ driver, onLogout }) {
-  // Manejo unificado de ID para evitar fallos de compatibilidad Mongo (_id vs id)
-  const driverId = driver?.id || driver?._id;
+  // Manejo unificado de ID buscando en las propiedades posibles o localStorage
+  const driverId =
+    driver?.id ||
+    driver?._id ||
+    driver?.driverId ||
+    localStorage.getItem("driverId");
 
-  const [isOnline, setIsOnline] = useState(driver?.isOnline || false);
+  const [isOnline, setIsOnline] = useState(
+    driver?.isAvailable || driver?.isOnline || false,
+  );
   const [activeOrder, setActiveOrder] = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
   const [customRates, setCustomRates] = useState({});
@@ -111,10 +117,13 @@ export default function DriverDashboard({ driver, onLogout }) {
           const { latitude, longitude, heading, speed } = position.coords;
           const locationData = {
             driverId,
-            latitude,
-            longitude,
-            heading,
-            speed,
+            driverName: driver?.name || "Motocarro Express",
+            phone: driver?.phone || "",
+            lat: latitude,
+            lng: longitude,
+            heading: heading || 0,
+            speed: speed || 0,
+            isAvailable: true,
           };
 
           if (socketRef.current?.connected) {
@@ -139,10 +148,10 @@ export default function DriverDashboard({ driver, onLogout }) {
         navigator.geolocation.clearWatch(watchPositionId.current);
       }
     };
-  }, [isOnline, driverId]);
+  }, [isOnline, driverId, driver]);
 
   // ----------------------------------------------------
-  // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO (POLLING FALLBACK)
+  // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO
   // ----------------------------------------------------
   const fetchOrders = useCallback(async () => {
     if (!isOnline || activeOrder) return;
@@ -198,21 +207,57 @@ export default function DriverDashboard({ driver, onLogout }) {
   // 4. ACCIONES DEL CONDUCTOR
   // ----------------------------------------------------
   const toggleOnlineStatus = async () => {
+    if (!driverId) {
+      alert("Error de identificación del conductor. Vuelve a iniciar sesión.");
+      return;
+    }
+
     setLoading(true);
+    const newStatus = !isOnline;
+
     try {
-      const newStatus = !isOnline;
+      // Petición PATCH compatible con backend y envío del atributo isAvailable
       const res = await fetch(`${API_URL}/drivers/${driverId}/status`, {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isOnline: newStatus }),
+        body: JSON.stringify({
+          isAvailable: newStatus,
+          isOnline: newStatus,
+        }),
       });
 
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        // Resguardo si el endpoint en backend usa PUT
+        const fallbackRes = await fetch(
+          `${API_URL}/drivers/${driverId}/status`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              isAvailable: newStatus,
+              isOnline: newStatus,
+            }),
+          },
+        );
+        if (!fallbackRes.ok)
+          throw new Error("Error en actualización de estado");
+      }
 
       setIsOnline(newStatus);
-      if (!newStatus) setAvailableOrders([]);
+
+      // Notificar desconexión o disponibilidad inmediata vía WebSockets
+      if (socketRef.current?.connected) {
+        if (!newStatus) {
+          socketRef.current.emit("update_driver_location", {
+            driverId,
+            isAvailable: false,
+          });
+          setAvailableOrders([]);
+        }
+      }
     } catch (err) {
       alert("No se pudo cambiar el estado de conexión. Intenta de nuevo.");
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -373,7 +418,9 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <h2 className="text-xl font-bold mt-2">
                   {checkIsRide(activeOrder)
                     ? "Servicio de Pasajero"
-                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(-4)}`}
+                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(
+                        -4,
+                      )}`}
                 </h2>
               </div>
               <a
