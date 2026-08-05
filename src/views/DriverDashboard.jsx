@@ -418,39 +418,70 @@ export default function DriverDashboard({ driver, onLogout }) {
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       {/* Header */}
-      <header className="bg-slate-800 border-b border-slate-700 p-4 flex justify-between items-center sticky top-0 z-50">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
-            <Navigation className="w-6 h-6" />
+      <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
+        {/* Branding del Conductor */}
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
+            <svg
+              className="w-5 h-5 text-amber-500"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+              />
+            </svg>
           </div>
-          <div>
-            <h1 className="font-bold text-lg leading-tight">Inírida Express</h1>
-            <p className="text-xs text-slate-400">
-              {driver?.name || "Conductor"}
+          <div className="truncate">
+            <h1 className="font-bold text-sm sm:text-base leading-tight truncate">
+              Inírida Express
+            </h1>
+            <p className="text-[10px] sm:text-xs text-gray-400 leading-none">
+              Conductor
             </p>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
+        {/* Contenedor de Botones de Acción */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={toggleOnlineStatus}
-            disabled={loading}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-full font-semibold transition-all ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
               isOnline
-                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/30"
-                : "bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500/30"
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
+                : "bg-gray-800 text-gray-400 border border-gray-700"
             }`}
           >
-            <Power className="w-4 h-4" />
-            <span className="text-sm">
-              {isOnline ? "En Línea" : "Desconectado"}
+            <span
+              className={`w-2 h-2 rounded-full ${isOnline ? "bg-emerald-400 animate-pulse" : "bg-gray-500"}`}
+            />
+            <span className="whitespace-nowrap">
+              {isOnline ? "En Línea" : "Off-line"}
             </span>
           </button>
+
           <button
             onClick={onLogout}
-            className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700/50"
+            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+            title="Cerrar sesión"
           >
-            <XCircle className="w-5 h-5" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
           </button>
         </div>
       </header>
