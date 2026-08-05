@@ -216,7 +216,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     const newStatus = !isOnline;
 
     try {
-      // Petición PATCH compatible con backend y envío del atributo isAvailable
+      // Apunta exactamente a /drivers/:id/status
       const res = await fetch(`${API_URL}/drivers/${driverId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -227,7 +227,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       });
 
       if (!res.ok) {
-        // Resguardo si el endpoint en backend usa PUT
         const fallbackRes = await fetch(
           `${API_URL}/drivers/${driverId}/status`,
           {
@@ -245,7 +244,6 @@ export default function DriverDashboard({ driver, onLogout }) {
 
       setIsOnline(newStatus);
 
-      // Notificar desconexión o disponibilidad inmediata vía WebSockets
       if (socketRef.current?.connected) {
         if (!newStatus) {
           socketRef.current.emit("update_driver_location", {

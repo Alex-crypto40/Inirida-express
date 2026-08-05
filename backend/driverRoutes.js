@@ -25,7 +25,11 @@ router.post("/login", loginDriver);
 // Obtener perfil del repartidor
 router.get("/:id", getDriverProfile);
 
-// Cambiar disponibilidad (Soporta PUT y PATCH para mayor flexibilidad del cliente)
+// Cambiar disponibilidad (Ruta principal /status)
+router.patch("/:id/status", toggleOnlineStatus);
+router.put("/:id/status", toggleOnlineStatus);
+
+// Alias /online por compatibilidad
 router.patch("/:id/online", toggleOnlineStatus);
 router.put("/:id/online", toggleOnlineStatus);
 
