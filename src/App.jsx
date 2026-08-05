@@ -29,8 +29,7 @@ import DriverLogin from "./views/DriverLogin";
 
 // URL de tu servidor backend en Render o localhost
 const SOCKET_URL =
-  import.meta.env.VITE_BACKEND_URL ||
-  "https://inirida-express-frontend.onrender.com";
+  import.meta.env.VITE_BACKEND_URL || "https://inirida-express.onrender.com";
 
 // Vista para la convocatoria de domiciliarios
 function Repartidores() {

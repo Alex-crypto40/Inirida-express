@@ -23,7 +23,7 @@ import Message from "./backend/Message.js";
 
 const app = express();
 
-// 🔒 Configuración de CORS permitiendo orígenes explícitos
+// 🔒 Configuración de CORS permitiendo orígenes explícitos y dinámicos
 const allowedOrigins = [
   "https://inirida-express-frontend.onrender.com",
   "http://localhost:5173",
@@ -36,10 +36,11 @@ if (process.env.CLIENT_URL) {
 
 const corsOptions = {
   origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
+    // Permitir peticiones sin origen (como clientes móviles, postman o el mismo servidor)
+    if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".onrender.com")) {
       callback(null, true);
     } else {
-      callback(null, true);
+      callback(null, true); // Permite acceso para desarrollo; cambia a callback(new Error("CORS")) en producción estricta
     }
   },
   credentials: true,
@@ -59,12 +60,17 @@ if (fs.existsSync(distPath)) {
 
 // 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
+
+// Configuración robusta de Socket.io
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    origin: (origin, callback) => callback(null, true), // Permite handshake sin bloqueos de origen cruzado
+    methods: ["GET", "POST"],
     credentials: true,
   },
+  transports: ["websocket", "polling"], // Garantiza compatibilidad de transportes
+  pingTimeout: 60000,
+  pingInterval: 25000,
 });
 
 // 🔑 Inyectamos 'io' en Express
@@ -80,11 +86,11 @@ io.on("connection", (socket) => {
   // Enviar lista completa de motocarros disponibles inmediatamente al conectar
   socket.emit(
     "initial_drivers_locations",
-    Array.from(activeDriversLocations.values()),
+    Array.from(activeDriversLocations.values())
   );
   socket.emit(
     "drivers_online_list",
-    Array.from(activeDriversLocations.values()),
+    Array.from(activeDriversLocations.values())
   );
 
   // 🛰️ Evento: Actualización de posición GPS del conductor
@@ -122,7 +128,7 @@ io.on("connection", (socket) => {
       io.emit("driver_location_changed", driverInfo);
       io.emit(
         "drivers_online_list",
-        Array.from(activeDriversLocations.values()),
+        Array.from(activeDriversLocations.values())
       );
     } else {
       // Si se desactiva o toma carrera, se remueve del mapa público
@@ -130,7 +136,7 @@ io.on("connection", (socket) => {
       io.emit("driver_disconnected_location", { driverId });
       io.emit(
         "drivers_online_list",
-        Array.from(activeDriversLocations.values()),
+        Array.from(activeDriversLocations.values())
       );
     }
   });
@@ -154,7 +160,7 @@ io.on("connection", (socket) => {
     socket.join(orderId);
     socket.join(`order_${orderId}`);
     console.log(
-      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
+      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`
     );
   });
 
@@ -164,7 +170,7 @@ io.on("connection", (socket) => {
     socket.leave(orderId);
     socket.leave(`order_${orderId}`);
     console.log(
-      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`,
+      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`
     );
   });
 
@@ -200,7 +206,7 @@ io.on("connection", (socket) => {
         io.emit("driver_disconnected_location", { driverId });
         io.emit(
           "drivers_online_list",
-          Array.from(activeDriversLocations.values()),
+          Array.from(activeDriversLocations.values())
         );
         break;
       }
@@ -214,8 +220,8 @@ app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
 
-// 🌐 Ruta comodín para Single Page Application
-app.get(/(.*)/, (req, res) => {
+// 🌐 Ruta comodín para Single Page Application (Ignorando rutas que inicien con /socket.io/)
+app.get(/^(?!\/socket\.io\/).*/, (req, res) => {
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {
     res.sendFile(indexPath);
@@ -231,7 +237,7 @@ const PORT = process.env.PORT || 5000;
 // Inicializamos primero la base de datos y luego el servidor
 const startServer = async () => {
   try {
-    await connectDB(); // 👈 Esperamos a que la conexión a MongoDB esté lista
+    await connectDB();
 
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Servidor con WebSockets y GPS activo en puerto ${PORT}`);
