@@ -37,10 +37,14 @@ if (process.env.CLIENT_URL) {
 const corsOptions = {
   origin: function (origin, callback) {
     // Permitir peticiones sin origen (como clientes móviles, postman o el mismo servidor)
-    if (!origin || allowedOrigins.includes(origin) || origin.endsWith(".onrender.com")) {
+    if (
+      !origin ||
+      allowedOrigins.includes(origin) ||
+      origin.endsWith(".onrender.com")
+    ) {
       callback(null, true);
     } else {
-      callback(null, true); // Permite acceso para desarrollo; cambia a callback(new Error("CORS")) en producción estricta
+      callback(null, true); // Permite acceso para desarrollo
     }
   },
   credentials: true,
@@ -61,16 +65,18 @@ if (fs.existsSync(distPath)) {
 // 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
 
-// Configuración robusta de Socket.io
+// Configuración de Socket.io adaptada a redes inestables (Inírida / Cobertura Móvil Débil)
 const io = new Server(server, {
   cors: {
-    origin: (origin, callback) => callback(null, true), // Permite handshake sin bloqueos de origen cruzado
+    origin: (origin, callback) => callback(null, true),
     methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["websocket", "polling"], // Garantiza compatibilidad de transportes
-  pingTimeout: 60000,
-  pingInterval: 25000,
+  // Inicia por 'polling' para asegurar handshake sobre redes débiles y escala a 'websocket'
+  transports: ["polling", "websocket"],
+  pingTimeout: 90000, // 90 segundos de tolerancia a microcortes de red antes de declarar desconexión
+  pingInterval: 25000, // Heartbeat cada 25 segundos para mantener viva la ruta de red
+  connectTimeout: 45000, // Tiempo límite para completar la conexión inicial
 });
 
 // 🔑 Inyectamos 'io' en Express
@@ -83,14 +89,25 @@ const activeDriversLocations = new Map();
 io.on("connection", (socket) => {
   console.log(`⚡ Usuario conectado al WebSocket: ${socket.id}`);
 
+  // Registro explícito del conductor para reconexión instantánea
+  socket.on("register_driver", (driverId) => {
+    if (!driverId) return;
+    const existing = activeDriversLocations.get(driverId);
+    if (existing) {
+      existing.socketId = socket.id;
+      existing.updatedAt = new Date();
+      activeDriversLocations.set(driverId, existing);
+    }
+  });
+
   // Enviar lista completa de motocarros disponibles inmediatamente al conectar
   socket.emit(
     "initial_drivers_locations",
-    Array.from(activeDriversLocations.values())
+    Array.from(activeDriversLocations.values()),
   );
   socket.emit(
     "drivers_online_list",
-    Array.from(activeDriversLocations.values())
+    Array.from(activeDriversLocations.values()),
   );
 
   // 🛰️ Evento: Actualización de posición GPS del conductor
@@ -128,7 +145,7 @@ io.on("connection", (socket) => {
       io.emit("driver_location_changed", driverInfo);
       io.emit(
         "drivers_online_list",
-        Array.from(activeDriversLocations.values())
+        Array.from(activeDriversLocations.values()),
       );
     } else {
       // Si se desactiva o toma carrera, se remueve del mapa público
@@ -136,7 +153,7 @@ io.on("connection", (socket) => {
       io.emit("driver_disconnected_location", { driverId });
       io.emit(
         "drivers_online_list",
-        Array.from(activeDriversLocations.values())
+        Array.from(activeDriversLocations.values()),
       );
     }
   });
@@ -160,7 +177,7 @@ io.on("connection", (socket) => {
     socket.join(orderId);
     socket.join(`order_${orderId}`);
     console.log(
-      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`
+      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
     );
   });
 
@@ -170,7 +187,7 @@ io.on("connection", (socket) => {
     socket.leave(orderId);
     socket.leave(`order_${orderId}`);
     console.log(
-      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`
+      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`,
     );
   });
 
@@ -195,22 +212,29 @@ io.on("connection", (socket) => {
     }
   });
 
-  // Desconexión limpia del usuario/conductor
+  // Desconexión con tolerancia a parpadeos de red móvil
   socket.on("disconnect", () => {
     console.log(`❌ Usuario desconectado del WebSocket: ${socket.id}`);
 
-    // Limpiar mapa si el socket pertenecía a un conductor
-    for (const [driverId, info] of activeDriversLocations.entries()) {
-      if (info.socketId === socket.id) {
-        activeDriversLocations.delete(driverId);
-        io.emit("driver_disconnected_location", { driverId });
-        io.emit(
-          "drivers_online_list",
-          Array.from(activeDriversLocations.values())
-        );
-        break;
+    // Damos un pequeño margen de gracia de 15 segundos antes de borrar al motocarro del mapa
+    // en caso de que sea solo una reconexión rápida por cambio de celda de antena.
+    setTimeout(() => {
+      for (const [driverId, info] of activeDriversLocations.entries()) {
+        if (info.socketId === socket.id) {
+          // Si en los últimos 15s no volvió a actualizar su socketId
+          const timeDiff = new Date() - new Date(info.updatedAt);
+          if (timeDiff >= 15000) {
+            activeDriversLocations.delete(driverId);
+            io.emit("driver_disconnected_location", { driverId });
+            io.emit(
+              "drivers_online_list",
+              Array.from(activeDriversLocations.values()),
+            );
+          }
+          break;
+        }
       }
-    }
+    }, 15000);
   });
 });
 

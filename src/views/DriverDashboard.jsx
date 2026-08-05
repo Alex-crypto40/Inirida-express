@@ -65,16 +65,21 @@ export default function DriverDashboard({ driver, onLogout }) {
   };
 
   // ----------------------------------------------------
-  // 1. CONEXIÓN SOCKET Y EVENTOS EN TIEMPO REAL
+  // 1. CONEXIÓN SOCKET OPTIMIZADA PARA REDES DÉCILES
   // ----------------------------------------------------
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
-      reconnectionDelay: 2000,
+      // 1. Inicia por polling para asegurar entrega y luego escala
+      transports: ["polling", "websocket"],
+      reconnection: true,
+      reconnectionAttempts: Infinity, // No rendirse en zonas sin cobertura
+      reconnectionDelay: 3000, // Espera 3s entre intentos
+      reconnectionDelayMax: 10000, // Máximo 10s para no saturar la red
+      timeout: 20000, // Tiempo de espera amplio
     });
 
     socketRef.current.on("connect", () => {
+      console.log("Conectado exitosamente al servidor");
       if (driverId) {
         socketRef.current.emit("register_driver", driverId);
       }
@@ -101,19 +106,37 @@ export default function DriverDashboard({ driver, onLogout }) {
       setChatMessages((prev) => [...prev, msg]);
     });
 
+    // Manejo de reconexión tras recuperar señal (bfcache o corte de torre)
+    const handlePageShow = (event) => {
+      if (socketRef.current && !socketRef.current.connected) {
+        socketRef.current.connect();
+      }
+    };
+    window.addEventListener("pageshow", handlePageShow);
+
     return () => {
+      window.removeEventListener("pageshow", handlePageShow);
       if (socketRef.current) socketRef.current.disconnect();
     };
   }, [driverId, isOnline, activeOrder]);
 
   // ----------------------------------------------------
-  // 2. GEOLOCALIZACIÓN RESILIENTE CON CONTROL DE ERRORES
+  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS
   // ----------------------------------------------------
   useEffect(() => {
     if (isOnline && "geolocation" in navigator) {
+      let lastSendTime = 0;
+
       watchPositionId.current = navigator.geolocation.watchPosition(
         (position) => {
           setGeoError(null);
+          const now = Date.now();
+
+          // Throttling: Enviar ubicación al servidor como máximo cada 10 segundos
+          // para no colapsar la conexión móvil de baja velocidad.
+          if (now - lastSendTime < 10000) return;
+          lastSendTime = now;
+
           const { latitude, longitude, heading, speed } = position.coords;
           const locationData = {
             driverId,
@@ -131,12 +154,15 @@ export default function DriverDashboard({ driver, onLogout }) {
           }
         },
         (err) => {
-          console.warn("Error en GPS:", err.message);
-          setGeoError(
-            "Acceso a GPS limitado. Revisa los permisos del navegador.",
-          );
+          console.warn("Aviso GPS:", err.message);
+          // Muestra una advertencia leve sin interrumpir la operación del conductor
+          setGeoError("Buscando señal GPS estable...");
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+        {
+          enableHighAccuracy: false, // Menos exigente pero funciona con señal débil
+          timeout: 30000, // Espera 30 segundos antes de dar timeout
+          maximumAge: 15000, // Acepta coordenadas recientes guardadas en caché
+        },
       );
     } else if (!isOnline && watchPositionId.current !== null) {
       navigator.geolocation.clearWatch(watchPositionId.current);
