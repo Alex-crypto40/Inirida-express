@@ -531,13 +531,13 @@ export default function DriverDashboard({ driver, onLogout }) {
     setCustomRates((prev) => ({ ...prev, [orderId]: num }));
   };
 
-  // --------------------------------------------------------------------------
-  // 3.7 Renderizado del Componente
-  // --------------------------------------------------------------------------
+  // ============================================================================
+  // BLOQUE 3.7: RENDERIZADO DEL COMPONENTE (FIX SINTAXIS Y SLICE)
+  // ============================================================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       {/* ------------------------------------------------------------------ */}
-      /* HEADER PRINCIPAL Y CONTROL ONLINE */
+      {/* HEADER PRINCIPAL Y CONTROL ONLINE */}
       {/* ------------------------------------------------------------------ */}
       <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
         <div className="flex items-center gap-2 min-w-0">
@@ -607,6 +607,7 @@ export default function DriverDashboard({ driver, onLogout }) {
           </button>
         </div>
       </header>
+
       {/* Alerta de señal GPS débil */}
       {geoError && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
@@ -614,13 +615,14 @@ export default function DriverDashboard({ driver, onLogout }) {
           <span>{geoError}</span>
         </div>
       )}
+
       {/* ------------------------------------------------------------------ */}
-      /* CONTENIDO PRINCIPAL */
+      {/* CONTENIDO PRINCIPAL */}
       {/* ------------------------------------------------------------------ */}
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
         {activeOrder ? (
           /* ================================================================ */
-          /* SECCIÓN A: ORDEN EN CURSO                                       */
+          /* SECCIÓN A: ORDEN EN CURSO                                        */
           /* ================================================================ */
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
             <div className="flex justify-between items-start border-b border-slate-700 pb-3">
@@ -633,9 +635,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <h2 className="text-xl font-bold mt-2">
                   {checkIsRide(activeOrder)
                     ? "Servicio de Pasajero"
-                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(
-                        -4,
-                      )}`}
+                    : `Pedido #${String(activeOrder._id || activeOrder.id || "").slice(-4)}`}
                 </h2>
               </div>
               <a
@@ -798,7 +798,7 @@ export default function DriverDashboard({ driver, onLogout }) {
           </div>
         ) : (
           /* ================================================================ */
-          /* SECCIÓN B: LISTA DE PEDIDOS DISPONIBLES                         */
+          /* SECCIÓN B: LISTA DE PEDIDOS DISPONIBLES                          */
           /* ================================================================ */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
@@ -832,7 +832,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             ) : (
               availableOrders.map((order) => {
-                const id = order._id || order.id;
+                const id = order._id || order.id || Math.random().toString();
                 const isRide = checkIsRide(order);
 
                 return (
