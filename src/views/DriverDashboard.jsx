@@ -125,12 +125,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   const checkIsRide = (order) => {
     if (!order) return false;
     const type = order.orderType || order.serviceType;
-    return (
-      type === "carrerita" ||
-      type === "pasajero" ||
-      type === "motocarro" ||
-      type === "ride"
-    );
+    return type === "carrerita" || type === "pasajero" || type === "motocarro";
   };
 
   // ----------------------------------------------------
@@ -296,12 +291,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         (orders || []).forEach((order) => {
           const id = order._id || order.id;
           if (!modifiedOffersRef.current.has(id)) {
-            updated[id] =
-              order.offeredRate ||
-              order.subtotal ||
-              order.total ||
-              order.deliveryFee ||
-              0;
+            updated[id] = order.offeredRate || order.deliveryFee || 0;
           }
         });
         return updated;
@@ -394,36 +384,29 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  const handleAcceptOrder = async (orderId, acceptedPrice) => {
+  const handleAcceptOrder = async (orderId) => {
     setLoading(true);
     try {
-      const baseUrl =
-        import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
-      const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-
-      const endpoint = cleanBaseUrl.endsWith("/api")
-        ? `${cleanBaseUrl}/orders/${orderId}/accept`
-        : `${cleanBaseUrl}/api/orders/${orderId}/accept`;
-
-      const res = await fetch(endpoint, {
+      const proposedRate = customRates[orderId];
+      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          driverId: driverId,
-          price: Number(acceptedPrice),
-        }),
+        body: JSON.stringify({ driverId, rate: proposedRate }),
       });
 
       const data = await res.json();
 
-      if (res.ok) {
-        alert("¡Carrera aceptada con éxito!");
-        checkActiveOrder();
-      } else {
-        alert(data.message || "No se pudo aceptar la carrera.");
+      if (!res.ok) {
+        throw new Error(data.message || "Error al aceptar el pedido.");
       }
-    } catch (error) {
-      console.error("Error al aceptar la orden:", error);
+
+      setActiveOrder(data.order || data);
+      setAvailableOrders([]);
+    } catch (err) {
+      alert(
+        err.message || "Error al aceptar el pedido. Tal vez ya fue tomado.",
+      );
+      fetchOrders();
     } finally {
       setLoading(false);
     }
@@ -498,6 +481,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
       {/* Header */}
       <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
+        {/* Branding del Conductor */}
         <div className="flex items-center gap-2 min-w-0">
           <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
             <svg
@@ -518,12 +502,14 @@ export default function DriverDashboard({ driver, onLogout }) {
             <h1 className="font-bold text-sm sm:text-base leading-tight truncate">
               Inírida Express
             </h1>
+            {/* 🟢 Muestra dinámicamente el nombre del conductor */}
             <p className="text-[10px] sm:text-xs text-amber-400/90 font-medium leading-none truncate mt-0.5">
               {driverName}
             </p>
           </div>
         </div>
 
+        {/* Contenedor de Botones de Acción */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={toggleOnlineStatus}
@@ -566,6 +552,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       </header>
 
+      {/* Alerta de GPS */}
       {geoError && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -574,6 +561,7 @@ export default function DriverDashboard({ driver, onLogout }) {
       )}
 
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
+        {/* VISTA 1: PEDIDO ACTIVO */}
         {activeOrder ? (
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
             <div className="flex justify-between items-start border-b border-slate-700 pb-3">
@@ -592,28 +580,21 @@ export default function DriverDashboard({ driver, onLogout }) {
                 </h2>
               </div>
               <a
-                href={`tel:${
-                  activeOrder.customer?.phone || activeOrder.clientPhone || ""
-                }`}
+                href={`tel:${activeOrder.clientPhone}`}
                 className="p-3 bg-emerald-500/20 text-emerald-400 rounded-full hover:bg-emerald-500/30"
               >
                 <Phone className="w-5 h-5" />
               </a>
             </div>
 
-            {/* Rutas Activas */}
+            {/* Rutas */}
             <div className="space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
               <div className="flex items-start space-x-3">
                 <MapPin className="w-5 h-5 text-emerald-400 mt-1 flex-shrink-0" />
                 <div>
                   <p className="text-xs text-slate-400">Origen / Recogida</p>
                   <p className="font-medium text-slate-200">
-                    {activeOrder.origen ||
-                      activeOrder.pickupAddress ||
-                      activeOrder.origin ||
-                      activeOrder.store?.name ||
-                      activeOrder.customer?.address ||
-                      "Origen no especificado"}
+                    {activeOrder.pickupAddress || activeOrder.origin}
                   </p>
                 </div>
               </div>
@@ -623,12 +604,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <div>
                   <p className="text-xs text-slate-400">Destino / Entrega</p>
                   <p className="font-medium text-slate-200">
-                    {activeOrder.destino ||
-                      activeOrder.deliveryAddress ||
-                      activeOrder.destination ||
-                      activeOrder.customer?.notes ||
-                      activeOrder.notes ||
-                      "Destino no especificado"}
+                    {activeOrder.deliveryAddress || activeOrder.destination}
                   </p>
                 </div>
               </div>
@@ -639,9 +615,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
                 <p className="text-xs text-slate-400">Cliente</p>
                 <p className="font-semibold">
-                  {activeOrder.customer?.name ||
-                    activeOrder.clientName ||
-                    "Usuario"}
+                  {activeOrder.clientName || "Usuario"}
                 </p>
               </div>
               <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
@@ -649,8 +623,6 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <p className="font-bold text-emerald-400 text-base">
                   $
                   {(
-                    activeOrder.total ||
-                    activeOrder.subtotal ||
                     activeOrder.agreedRate ||
                     activeOrder.totalAmount ||
                     0
@@ -712,6 +684,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                 </div>
               )}
 
+              {/* Formulario de Finalización */}
               {!checkIsRide(activeOrder) && (
                 <div className="space-y-1.5">
                   <label className="text-xs text-slate-400 block">
@@ -805,8 +778,6 @@ export default function DriverDashboard({ driver, onLogout }) {
                         Sugerido: $
                         {(
                           order.offeredRate ||
-                          order.subtotal ||
-                          order.total ||
                           order.deliveryFee ||
                           0
                         ).toLocaleString()}{" "}
@@ -814,35 +785,24 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </span>
                     </div>
 
-                    {/* Mapeo Múltiple de Origen y Destino */}
                     <div className="space-y-2 text-sm">
                       <div className="flex items-start space-x-2">
                         <MapPin className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
                         <p className="text-slate-300">
                           <span className="text-slate-500">De:</span>{" "}
-                          {order.origen ||
-                            order.pickupAddress ||
-                            order.origin ||
-                            order.store?.name ||
-                            order.customer?.address ||
-                            "Origen no especificado"}
+                          {order.pickupAddress || order.origin}
                         </p>
                       </div>
                       <div className="flex items-start space-x-2">
                         <Navigation className="w-4 h-4 text-amber-400 mt-0.5 flex-shrink-0" />
                         <p className="text-slate-300">
                           <span className="text-slate-500">A:</span>{" "}
-                          {order.destino ||
-                            order.deliveryAddress ||
-                            order.destination ||
-                            order.customer?.notes ||
-                            order.notes ||
-                            "Destino no especificado"}
+                          {order.deliveryAddress || order.destination}
                         </p>
                       </div>
                     </div>
 
-                    {/* Contraoferta y Aceptación */}
+                    {/* Contraoferta de Tarifa */}
                     <div className="pt-2 border-t border-slate-700/50 flex items-center space-x-3">
                       <div className="flex-1 relative">
                         <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -855,16 +815,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                         />
                       </div>
                       <button
-                        onClick={() =>
-                          handleAcceptOrder(
-                            id,
-                            customRates[id] ||
-                              order.offeredRate ||
-                              order.subtotal ||
-                              order.total ||
-                              0,
-                          )
-                        }
+                        onClick={() => handleAcceptOrder(id)}
                         disabled={loading}
                         className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-sm transition-colors shadow-md shadow-amber-500/10"
                       >
