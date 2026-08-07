@@ -4,22 +4,22 @@ import {
   MapPin,
   Navigation,
   DollarSign,
-  Package,
-  User,
-  CheckCircle2,
-  XCircle,
-  Send,
-  MessageSquare,
   Phone,
   AlertCircle,
   RefreshCw,
   Power,
-  ShieldCheck,
   Clock,
-  ExternalLink,
+  Send,
+  MessageSquare,
+  CheckCircle2,
 } from "lucide-react";
 
-// Configuración de URLs dinámicas (Producción en Render / Desarrollo)
+import "./DriverDashboard.css";
+
+// ============================================================================
+// CONFIGURACIÓN DE ENTORNO Y CONSTANTES DE RED
+// ============================================================================
+
 const IS_PROD =
   process.env.NODE_ENV === "production" ||
   window.location.hostname !== "localhost";
@@ -31,11 +31,12 @@ const BASE_DOMAIN = IS_PROD
 const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
 
-// ----------------------------------------------------
-// HELPERS AUXILIARES DE GEOLOCALIZACIÓN
-// ----------------------------------------------------
+// ============================================================================
+// FUNCIONES AUXILIARES DE GEOLOCALIZACIÓN Y GPS
+// ============================================================================
+
 function distance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Radio de la Tierra en metros
+  const R = 6371e3;
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
   const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -46,12 +47,12 @@ function distance(lat1, lon1, lat2, lon2) {
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c; // Distancia en metros
+  return R * c;
 }
 
 function smoothPosition(prevPos, currentPos) {
   if (!prevPos) return currentPos;
-  const factor = 0.3; // Factor de suavizado (0.3 posición actual, 0.7 anterior)
+  const factor = 0.3;
   return {
     lat: prevPos.lat + (currentPos.lat - prevPos.lat) * factor,
     lng: prevPos.lng + (currentPos.lng - prevPos.lng) * factor,
@@ -64,13 +65,15 @@ function getDynamicInterval(speed) {
   return 3000;
 }
 
+// ============================================================================
+// COMPONENTE PRINCIPAL (DRIVER DASHBOARD)
+// ============================================================================
+
 export default function DriverDashboard({ driver, onLogout }) {
-  // 🟢 Recuperar objeto respaldado en localStorage para persistencia al recargar
   const savedDriverData = JSON.parse(
     localStorage.getItem("driverData") || "{}",
   );
 
-  // Manejo unificado de ID buscando en las propiedades posibles o localStorage
   const driverId =
     driver?.id ||
     driver?._id ||
@@ -79,7 +82,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     savedDriverData?._id ||
     localStorage.getItem("driverId");
 
-  // 🟢 Obtener nombre dinámico del prop o de la memoria persistente
   const driverName =
     driver?.name ||
     driver?.fullName ||
@@ -89,7 +91,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     savedDriverData?.nombre ||
     "Conductor";
 
-  // Respaldar objeto de datos cuando la prop 'driver' cambie/exista
   useEffect(() => {
     if (driver && Object.keys(driver).length > 0) {
       localStorage.setItem("driverData", JSON.stringify(driver));
@@ -99,7 +100,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   }, [driver]);
 
-  // 🟢 AJUSTE 1: Inicialización con lectura de localStorage
+  // ESTADOS
   const [isOnline, setIsOnline] = useState(() => {
     const savedStatus = localStorage.getItem("driver_is_online");
     if (savedStatus !== null) {
@@ -127,9 +128,8 @@ export default function DriverDashboard({ driver, onLogout }) {
   const socketRef = useRef(null);
   const watchPositionId = useRef(null);
   const modifiedOffersRef = useRef(new Set());
-  const queueRef = useRef([]); // Buffer offline para ubicaciones
+  const queueRef = useRef([]);
 
-  // Helper para identificar si es carrera de pasajero
   const checkIsRide = (order) => {
     if (!order) return false;
     const type = order.orderType || order.serviceType;
@@ -141,17 +141,14 @@ export default function DriverDashboard({ driver, onLogout }) {
     );
   };
 
-  // ----------------------------------------------------
-  // 1. CONEXIÓN SOCKET OPTIMIZADA PARA REDES DÉCILES
-  // ----------------------------------------------------
+  // SOCKETS & VISIBILIDAD
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"],
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 3000,
-      reconnectionDelayMax: 10000,
-      timeout: 20000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      closeOnBeforeunload: false,
     });
 
     socketRef.current.on("connect", () => {
@@ -188,22 +185,23 @@ export default function DriverDashboard({ driver, onLogout }) {
       setChatMessages((prev) => [...prev, msg]);
     });
 
-    const handlePageShow = (event) => {
-      if (socketRef.current && !socketRef.current.connected) {
-        socketRef.current.connect();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        if (socketRef.current && !socketRef.current.connected) {
+          socketRef.current.connect();
+        }
       }
     };
-    window.addEventListener("pageshow", handlePageShow);
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (socketRef.current) socketRef.current.disconnect();
     };
   }, [driverId, isOnline, activeOrder]);
 
-  // ----------------------------------------------------
-  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN
-  // ----------------------------------------------------
+  // GEOLOCALIZACIÓN
   useEffect(() => {
     if (!isOnline || !("geolocation" in navigator)) return;
 
@@ -214,13 +212,9 @@ export default function DriverDashboard({ driver, onLogout }) {
       (position) => {
         const { latitude, longitude, accuracy, heading, speed } =
           position.coords;
-
         const now = Date.now();
 
-        if (accuracy > 120) {
-          console.warn(`[GPS] Baja precisión (${accuracy}m)`);
-          return;
-        }
+        if (accuracy > 120) return;
 
         if (lastValidPosition) {
           const dist = distance(
@@ -229,11 +223,7 @@ export default function DriverDashboard({ driver, onLogout }) {
             latitude,
             longitude,
           );
-
-          if (dist > 200) {
-            console.warn("[GPS] Salto detectado, ignorado");
-            return;
-          }
+          if (dist > 200) return;
         }
 
         const smoothed = smoothPosition(lastValidPosition, {
@@ -242,7 +232,6 @@ export default function DriverDashboard({ driver, onLogout }) {
         });
 
         lastValidPosition = smoothed;
-
         const interval = getDynamicInterval(speed);
 
         if (now - lastSendTime < interval) return;
@@ -250,7 +239,7 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         const locationData = {
           driverId,
-          driverName: driverName,
+          driverName,
           phone: driver?.phone || savedDriverData?.phone || "",
           lat: smoothed.lat,
           lng: smoothed.lng,
@@ -270,7 +259,6 @@ export default function DriverDashboard({ driver, onLogout }) {
         setGeoError(null);
       },
       (err) => {
-        console.warn("GPS error:", err.message);
         setGeoError("Señal GPS débil...");
       },
       {
@@ -287,9 +275,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     };
   }, [isOnline, driverId, driver, driverName, savedDriverData]);
 
-  // ----------------------------------------------------
-  // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO
-  // ----------------------------------------------------
+  // PETICIONES API (CON VALIDACIÓN ESTRECHA DE activeOrder)
   const fetchOrders = useCallback(async () => {
     if (!isOnline || activeOrder) return;
     try {
@@ -325,10 +311,18 @@ export default function DriverDashboard({ driver, onLogout }) {
       const res = await fetch(`${API_URL}/orders/active/driver/${driverId}`);
       if (res.ok) {
         const data = await res.json();
-        setActiveOrder(data);
+        // VALIDACIÓN: Evitar que data {} sea tratada como orden válida
+        if (data && (data._id || data.id)) {
+          setActiveOrder(data);
+        } else {
+          setActiveOrder(null);
+        }
+      } else {
+        setActiveOrder(null);
       }
     } catch (err) {
       console.error("Error al verificar orden activa:", err);
+      setActiveOrder(null);
     }
   }, [driverId]);
 
@@ -345,12 +339,10 @@ export default function DriverDashboard({ driver, onLogout }) {
     return () => clearInterval(interval);
   }, [isOnline, activeOrder, fetchOrders]);
 
-  // ----------------------------------------------------
-  // 4. ACCIONES DEL CONDUCTOR
-  // ----------------------------------------------------
+  // ACCIONES
   const toggleOnlineStatus = async () => {
     if (!driverId) {
-      alert("Error de identificación del conductor. Vuelve a iniciar sesión.");
+      alert("Error de identificación del conductor.");
       return;
     }
 
@@ -368,22 +360,16 @@ export default function DriverDashboard({ driver, onLogout }) {
       });
 
       if (!res.ok) {
-        const fallbackRes = await fetch(
-          `${API_URL}/drivers/${driverId}/status`,
-          {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              isAvailable: newStatus,
-              isOnline: newStatus,
-            }),
-          },
-        );
-        if (!fallbackRes.ok)
-          throw new Error("Error en actualización de estado");
+        await fetch(`${API_URL}/drivers/${driverId}/status`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            isAvailable: newStatus,
+            isOnline: newStatus,
+          }),
+        });
       }
 
-      // 🟢 AJUSTE 2: Guardar en localStorage al cambiar exitosamente
       setIsOnline(newStatus);
       localStorage.setItem("driver_is_online", JSON.stringify(newStatus));
 
@@ -397,7 +383,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         }
       }
     } catch (err) {
-      alert("No se pudo cambiar el estado de conexión. Intenta de nuevo.");
+      alert("No se pudo cambiar el estado de conexión.");
       console.error(err);
     } finally {
       setLoading(false);
@@ -407,33 +393,22 @@ export default function DriverDashboard({ driver, onLogout }) {
   const handleAcceptOrder = async (orderId, acceptedPrice) => {
     setLoading(true);
     try {
-      const baseUrl =
-        import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
-      const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
-
-      const endpoint = cleanBaseUrl.endsWith("/api")
-        ? `${cleanBaseUrl}/orders/${orderId}/accept`
-        : `${cleanBaseUrl}/api/orders/${orderId}/accept`;
-
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          driverId: driverId,
+          driverId,
           price: Number(acceptedPrice),
         }),
       });
 
-      const data = await res.json();
+      if (!res.ok) throw new Error("No se pudo aceptar la carrera.");
 
-      if (res.ok) {
-        alert("¡Carrera aceptada con éxito!");
-        checkActiveOrder();
-      } else {
-        alert(data.message || "No se pudo aceptar la carrera.");
-      }
+      alert("¡Carrera aceptada con éxito!");
+      checkActiveOrder();
     } catch (error) {
       console.error("Error al aceptar la orden:", error);
+      alert(error.message || "No se pudo aceptar la carrera.");
     } finally {
       setLoading(false);
     }
@@ -462,10 +437,8 @@ export default function DriverDashboard({ driver, onLogout }) {
       });
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.message || "PIN incorrecto o fallo en servidor.");
-      }
+      if (!res.ok)
+        throw new Error(data.message || "Error al completar pedido.");
 
       setActiveOrder(null);
       setCompletionPin("");
@@ -501,12 +474,9 @@ export default function DriverDashboard({ driver, onLogout }) {
     setCustomRates((prev) => ({ ...prev, [orderId]: num }));
   };
 
-  // ----------------------------------------------------
-  // 5. RENDERIZADO
-  // ----------------------------------------------------
+  // RENDER
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      {/* Header */}
       <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
         <div className="flex items-center gap-2 min-w-0">
           <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
@@ -584,7 +554,7 @@ export default function DriverDashboard({ driver, onLogout }) {
       )}
 
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
-        {activeOrder ? (
+        {activeOrder && (activeOrder._id || activeOrder.id) ? (
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
             <div className="flex justify-between items-start border-b border-slate-700 pb-3">
               <div>
@@ -596,9 +566,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <h2 className="text-xl font-bold mt-2">
                   {checkIsRide(activeOrder)
                     ? "Servicio de Pasajero"
-                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(
-                        -4,
-                      )}`}
+                    : `Pedido #${String(activeOrder._id || activeOrder.id || "").slice(-4)}`}
                 </h2>
               </div>
               <a
@@ -611,7 +579,6 @@ export default function DriverDashboard({ driver, onLogout }) {
               </a>
             </div>
 
-            {/* Rutas Activas */}
             <div className="space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
               <div className="flex items-start space-x-3">
                 <MapPin className="w-5 h-5 text-emerald-400 mt-1 flex-shrink-0" />
@@ -644,7 +611,6 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Detalles del Cliente / Valor */}
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
                 <p className="text-xs text-slate-400">Cliente</p>
@@ -670,7 +636,6 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Chat y Finalización */}
             <div className="space-y-3 pt-2">
               <button
                 onClick={() => setIsChatOpen(!isChatOpen)}
@@ -760,7 +725,6 @@ export default function DriverDashboard({ driver, onLogout }) {
             </div>
           </div>
         ) : (
-          /* VISTA 2: LISTA DE PEDIDOS DISPONIBLES */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-slate-200">
@@ -793,7 +757,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             ) : (
               availableOrders.map((order) => {
-                const id = order._id || order.id;
+                const id = order._id || order.id || Math.random().toString();
                 const isRide = checkIsRide(order);
 
                 return (
@@ -824,7 +788,6 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </span>
                     </div>
 
-                    {/* Mapeo Múltiple de Origen y Destino */}
                     <div className="space-y-2 text-sm">
                       <div className="flex items-start space-x-2">
                         <MapPin className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
@@ -852,7 +815,6 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </div>
                     </div>
 
-                    {/* Contraoferta y Aceptación */}
                     <div className="pt-2 border-t border-slate-700/50 flex items-center space-x-3">
                       <div className="flex-1 relative">
                         <DollarSign className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
