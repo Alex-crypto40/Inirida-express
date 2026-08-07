@@ -99,12 +99,20 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   }, [driver]);
 
-  const [isOnline, setIsOnline] = useState(
-    driver?.isAvailable ||
+  // 🟢 AJUSTE 1: Inicialización con lectura de localStorage
+  const [isOnline, setIsOnline] = useState(() => {
+    const savedStatus = localStorage.getItem("driver_is_online");
+    if (savedStatus !== null) {
+      return JSON.parse(savedStatus);
+    }
+    return (
+      driver?.isAvailable ||
       driver?.isOnline ||
       savedDriverData?.isAvailable ||
-      false,
-  );
+      false
+    );
+  });
+
   const [activeOrder, setActiveOrder] = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
   const [customRates, setCustomRates] = useState({});
@@ -375,7 +383,9 @@ export default function DriverDashboard({ driver, onLogout }) {
           throw new Error("Error en actualización de estado");
       }
 
+      // 🟢 AJUSTE 2: Guardar en localStorage al cambiar exitosamente
       setIsOnline(newStatus);
+      localStorage.setItem("driver_is_online", JSON.stringify(newStatus));
 
       if (socketRef.current?.connected) {
         if (!newStatus) {
