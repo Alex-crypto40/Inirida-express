@@ -14,8 +14,6 @@ import {
   CheckCircle2,
 } from "lucide-react";
 
-import "./DriverDashboard.css";
-
 // ============================================================================
 // CONFIGURACIÓN DE ENTORNO Y CONSTANTES DE RED
 // ============================================================================
