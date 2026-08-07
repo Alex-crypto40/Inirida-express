@@ -415,7 +415,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         ? `${cleanBaseUrl}/orders/${orderId}/accept`
         : `${cleanBaseUrl}/api/orders/${orderId}/accept`;
 
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -424,16 +424,21 @@ export default function DriverDashboard({ driver, onLogout }) {
         }),
       });
 
-      const data = await res.json();
-
-      if (res.ok) {
-        alert("¡Carrera aceptada con éxito!");
-        checkActiveOrder();
-      } else {
-        alert(data.message || "No se pudo aceptar la carrera.");
+      // Si la respuesta no es OK, leemos texto en lugar de json() directamente para evitar el crash del '<'
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("Respuesta del servidor:", errorText);
+        throw new Error(
+          `Error ${res.status}: No se encontró la ruta en el servidor.`,
+        );
       }
+
+      const data = await res.json();
+      alert("¡Carrera aceptada con éxito!");
+      checkActiveOrder();
     } catch (error) {
       console.error("Error al aceptar la orden:", error);
+      alert(error.message || "No se pudo aceptar la carrera.");
     } finally {
       setLoading(false);
     }

@@ -11,6 +11,8 @@ import {
   updateDriverLocation,
   rateOrder,
   cancelOrder,
+  // IMPORTANTE: Asegúrate de tener exportada esta función en tu orderController.js
+  // completeOrder
 } from "./orderController.js";
 
 const router = express.Router();
@@ -25,8 +27,8 @@ router.post("/", createOrder);
 // Obtener pedidos disponibles para conductores
 router.get("/available", getAvailableOrders);
 
-// Obtener la carrera activa que un repartidor tiene en curso
-router.get("/driver/:driverId/active", getActiveDriverOrder);
+// CORRECCIÓN: Ajustado para que coincida con el fetch del frontend: /orders/active/driver/${driverId}
+router.get("/active/driver/:driverId", getActiveDriverOrder);
 
 /* ==========================================================================
    2. Rutas Parametrizadas por Pedido (/:orderId/...)
@@ -38,8 +40,12 @@ router.get("/:orderId", getOrderById);
 // Obtener el historial de mensajes del chat de un pedido
 router.get("/:orderId/messages", getOrderMessages);
 
-// Tomar una carrera o domicilio
-router.post("/:orderId/take", takeOrder);
+// CORRECCIÓN: Ajustado a /accept para evitar el error 404 (Frontend hace POST a /accept)
+router.post("/:orderId/accept", takeOrder);
+
+// NUEVO: El frontend hace POST a /complete para verificar el PIN y finalizar.
+// Asigna esto a tu controlador de finalización (ej: completeOrder o updateOrderStatus)
+router.post("/:orderId/complete", updateOrderStatus);
 
 // Enviar contraoferta al cliente (Motocarros / Domiciliarios)
 router.post("/:orderId/counter-offer", sendCounterOffer);
@@ -51,7 +57,7 @@ router.patch("/:orderId/location", updateDriverLocation);
 // Cancelar carrera / pedido (Resuelve la cancelación explícita)
 router.patch("/:orderId/cancel", cancelOrder);
 
-// Actualizar estado del pedido (at_store, on_the_way, completed, cancelled)
+// Actualizar estado general del pedido (at_store, on_the_way, etc.)
 router.patch("/:orderId/status", updateOrderStatus);
 
 // Calificar la entrega / carrera
