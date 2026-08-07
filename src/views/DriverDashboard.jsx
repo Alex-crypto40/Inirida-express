@@ -19,11 +19,13 @@ import {
   ExternalLink,
 } from "lucide-react";
 
+// Importación de los estilos externos
+import "./DriverDashboard.css";
+
 // ============================================================================
 // BLOQUE 1: CONFIGURACIÓN DE ENTORNO Y CONSTANTES DE RED
 // ============================================================================
 
-// Identificación del entorno de ejecución (Render vs Localhost)
 const IS_PROD =
   process.env.NODE_ENV === "production" ||
   window.location.hostname !== "localhost";
@@ -122,7 +124,6 @@ export default function DriverDashboard({ driver, onLogout }) {
   // 3.2 Estados Reactivos
   // --------------------------------------------------------------------------
 
-  // Estado de Disponibilidad (Lectura inicial persistida)
   const [isOnline, setIsOnline] = useState(() => {
     const savedStatus = localStorage.getItem("driver_is_online");
     if (savedStatus !== null) {
@@ -245,13 +246,11 @@ export default function DriverDashboard({ driver, onLogout }) {
           position.coords;
         const now = Date.now();
 
-        // Descartar lecturas con margen de error amplio (>120m)
         if (accuracy > 120) {
           console.warn(`[GPS] Baja precisión (${accuracy}m)`);
           return;
         }
 
-        // Prevenir saltos irrealistas mayores a 200m entre lecturas
         if (lastValidPosition) {
           const dist = distance(
             lastValidPosition.lat,
@@ -327,7 +326,6 @@ export default function DriverDashboard({ driver, onLogout }) {
 
       setAvailableOrders(orders || []);
 
-      // Preservar contraofertas modificadas manualmente por el conductor
       setCustomRates((prev) => {
         const updated = { ...prev };
         (orders || []).forEach((order) => {
@@ -365,7 +363,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     checkActiveOrder();
   }, [checkActiveOrder]);
 
-  // Polling de seguridad para actualizar lista disponible
   useEffect(() => {
     let interval;
     if (isOnline && !activeOrder) {
@@ -379,7 +376,6 @@ export default function DriverDashboard({ driver, onLogout }) {
   // 3.6 Acciones de Interacción y Manejo de Peticiones
   // --------------------------------------------------------------------------
 
-  // Alternar Estado En Línea / Offline
   const toggleOnlineStatus = async () => {
     if (!driverId) {
       alert("Error de identificación del conductor. Vuelve a iniciar sesión.");
@@ -435,7 +431,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  // Aceptar Pedido u Oferta
   const handleAcceptOrder = async (orderId, acceptedPrice) => {
     setLoading(true);
     try {
@@ -466,7 +461,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  // Finalizar Carrera o Pedido Activo
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
     const isRide = checkIsRide(activeOrder);
@@ -505,7 +499,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  // Enviar mensaje al chat en vivo
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeOrder) return;
@@ -524,21 +517,18 @@ export default function DriverDashboard({ driver, onLogout }) {
     setNewMessage("");
   };
 
-  // Actualizar tarifa personalizada / contraoferta
   const handleRateChange = (orderId, val) => {
     const num = parseFloat(val) || 0;
     modifiedOffersRef.current.add(orderId);
     setCustomRates((prev) => ({ ...prev, [orderId]: num }));
   };
 
-  // ============================================================================
-  // BLOQUE 3.7: RENDERIZADO DEL COMPONENTE (FIX SINTAXIS Y SLICE)
-  // ============================================================================
+  // --------------------------------------------------------------------------
+  // 3.7 Renderizado del Componente
+  // --------------------------------------------------------------------------
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      {/* ------------------------------------------------------------------ */}
-      {/* HEADER PRINCIPAL Y CONTROL ONLINE */}
-      {/* ------------------------------------------------------------------ */}
+      {/* HEADER PRINCIPAL */}
       <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
         <div className="flex items-center gap-2 min-w-0">
           <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
@@ -608,7 +598,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       </header>
 
-      {/* Alerta de señal GPS débil */}
+      {/* Alerta GPS */}
       {geoError && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -616,14 +606,10 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       )}
 
-      {/* ------------------------------------------------------------------ */}
       {/* CONTENIDO PRINCIPAL */}
-      {/* ------------------------------------------------------------------ */}
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
         {activeOrder ? (
-          /* ================================================================ */
-          /* SECCIÓN A: ORDEN EN CURSO                                        */
-          /* ================================================================ */
+          /* SECCIÓN A: ORDEN EN CURSO */
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
             <div className="flex justify-between items-start border-b border-slate-700 pb-3">
               <div>
@@ -681,7 +667,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Detalles del Cliente / Valor */}
+            {/* Detalles Cliente / Valor */}
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
                 <p className="text-xs text-slate-400">Cliente</p>
@@ -707,7 +693,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Chat Integrado y Verificación con PIN */}
+            {/* Chat Integrado y PIN */}
             <div className="space-y-3 pt-2">
               <button
                 onClick={() => setIsChatOpen(!isChatOpen)}
@@ -797,9 +783,7 @@ export default function DriverDashboard({ driver, onLogout }) {
             </div>
           </div>
         ) : (
-          /* ================================================================ */
-          /* SECCIÓN B: LISTA DE PEDIDOS DISPONIBLES                          */
-          /* ================================================================ */
+          /* SECCIÓN B: PEDIDOS DISPONIBLES */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-slate-200">
@@ -863,7 +847,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </span>
                     </div>
 
-                    {/* Direcciones de Recogida y Destino */}
+                    {/* Direcciones */}
                     <div className="space-y-2 text-sm">
                       <div className="flex items-start space-x-2">
                         <MapPin className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
