@@ -19,13 +19,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-// Importación de los estilos externos
-import "./DriverDashboard.css";
-
-// ============================================================================
-// BLOQUE 1: CONFIGURACIÓN DE ENTORNO Y CONSTANTES DE RED
-// ============================================================================
-
+// Configuración de URLs dinámicas (Producción en Render / Desarrollo)
 const IS_PROD =
   process.env.NODE_ENV === "production" ||
   window.location.hostname !== "localhost";
@@ -37,16 +31,11 @@ const BASE_DOMAIN = IS_PROD
 const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
 const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
 
-// ============================================================================
-// BLOQUE 2: FUNCIONES AUXILIARES DE GEOLOCALIZACIÓN Y GPS
-// ============================================================================
-
-/**
- * Calculo de distancia entre dos coordenadas geográficas mediante Haversine.
- * @returns {number} Distancia en metros.
- */
+// ----------------------------------------------------
+// HELPERS AUXILIARES DE GEOLOCALIZACIÓN
+// ----------------------------------------------------
 function distance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3; // Radio terrestre
+  const R = 6371e3; // Radio de la Tierra en metros
   const φ1 = (lat1 * Math.PI) / 180;
   const φ2 = (lat2 * Math.PI) / 180;
   const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -57,42 +46,31 @@ function distance(lat1, lon1, lat2, lon2) {
     Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-  return R * c;
+  return R * c; // Distancia en metros
 }
 
-/**
- * Aplica filtro paso bajo (suavizado) a la posición GPS para evitar saltos.
- */
 function smoothPosition(prevPos, currentPos) {
   if (!prevPos) return currentPos;
-  const factor = 0.3; // 30% posición actual, 70% anterior
+  const factor = 0.3; // Factor de suavizado (0.3 posición actual, 0.7 anterior)
   return {
     lat: prevPos.lat + (currentPos.lat - prevPos.lat) * factor,
     lng: prevPos.lng + (currentPos.lng - prevPos.lng) * factor,
   };
 }
 
-/**
- * Asigna intervalos dinámicos de transmisión según la velocidad del vehículo.
- */
 function getDynamicInterval(speed) {
-  if (!speed || speed < 1.5) return 7000; // Detenido o muy lento (7s)
-  if (speed < 5) return 5000; // Velocidad moderada (5s)
-  return 3000; // En movimiento rápido (3s)
+  if (!speed || speed < 1.5) return 7000;
+  if (speed < 5) return 5000;
+  return 3000;
 }
 
-// ============================================================================
-// BLOQUE 3: COMPONENTE PRINCIPAL (DRIVER DASHBOARD)
-// ============================================================================
-
 export default function DriverDashboard({ driver, onLogout }) {
-  // --------------------------------------------------------------------------
-  // 3.1 Carga Inicial y Persistencia de Identidad
-  // --------------------------------------------------------------------------
+  // 🟢 Recuperar objeto respaldado en localStorage para persistencia al recargar
   const savedDriverData = JSON.parse(
     localStorage.getItem("driverData") || "{}",
   );
 
+  // Manejo unificado de ID buscando en las propiedades posibles o localStorage
   const driverId =
     driver?.id ||
     driver?._id ||
@@ -101,6 +79,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     savedDriverData?._id ||
     localStorage.getItem("driverId");
 
+  // 🟢 Obtener nombre dinámico del prop o de la memoria persistente
   const driverName =
     driver?.name ||
     driver?.fullName ||
@@ -110,7 +89,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     savedDriverData?.nombre ||
     "Conductor";
 
-  // Sincronizar datos del conductor en almacenamiento local ante recargas
+  // Respaldar objeto de datos cuando la prop 'driver' cambie/exista
   useEffect(() => {
     if (driver && Object.keys(driver).length > 0) {
       localStorage.setItem("driverData", JSON.stringify(driver));
@@ -120,10 +99,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   }, [driver]);
 
-  // --------------------------------------------------------------------------
-  // 3.2 Estados Reactivos
-  // --------------------------------------------------------------------------
-
+  // 🟢 AJUSTE 1: Inicialización con lectura de localStorage
   const [isOnline, setIsOnline] = useState(() => {
     const savedStatus = localStorage.getItem("driver_is_online");
     if (savedStatus !== null) {
@@ -148,13 +124,12 @@ export default function DriverDashboard({ driver, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [geoError, setGeoError] = useState(null);
 
-  // Referencias mutables (evitan renders innecesarios)
   const socketRef = useRef(null);
   const watchPositionId = useRef(null);
   const modifiedOffersRef = useRef(new Set());
-  const queueRef = useRef([]); // Cola offline de geolocalización
+  const queueRef = useRef([]); // Buffer offline para ubicaciones
 
-  // Helper local para validar tipo de servicio
+  // Helper para identificar si es carrera de pasajero
   const checkIsRide = (order) => {
     if (!order) return false;
     const type = order.orderType || order.serviceType;
@@ -166,9 +141,9 @@ export default function DriverDashboard({ driver, onLogout }) {
     );
   };
 
-  // --------------------------------------------------------------------------
-  // 3.3 Gestión de Conexión WebSocket (Socket.io)
-  // --------------------------------------------------------------------------
+  // ----------------------------------------------------
+  // 1. CONEXIÓN SOCKET OPTIMIZADA PARA REDES DÉCILES
+  // ----------------------------------------------------
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
@@ -184,7 +159,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       if (driverId) {
         socketRef.current.emit("register_driver", driverId);
       }
-      // Vaciar buffer de ubicaciones guardadas durante desconexión
       if (queueRef.current.length > 0) {
         queueRef.current.forEach((locationData) => {
           socketRef.current.emit("update_driver_location", locationData);
@@ -193,7 +167,6 @@ export default function DriverDashboard({ driver, onLogout }) {
       }
     });
 
-    // Escuchar nuevos pedidos en tiempo real
     socketRef.current.on("order_created", (newOrder) => {
       if (isOnline && !activeOrder) {
         setAvailableOrders((prev) => [
@@ -205,20 +178,17 @@ export default function DriverDashboard({ driver, onLogout }) {
       }
     });
 
-    // Eliminar pedido aceptado por otro conductor
     socketRef.current.on("order_taken", (takenOrderId) => {
       setAvailableOrders((prev) =>
         prev.filter((o) => (o._id || o.id) !== takenOrderId),
       );
     });
 
-    // Recibir mensajes del chat activo
     socketRef.current.on("new_chat_message", (msg) => {
       setChatMessages((prev) => [...prev, msg]);
     });
 
-    // Reconectar en caso de cambio de pestaña o desbloqueo de pantalla
-    const handlePageShow = () => {
+    const handlePageShow = (event) => {
       if (socketRef.current && !socketRef.current.connected) {
         socketRef.current.connect();
       }
@@ -231,9 +201,9 @@ export default function DriverDashboard({ driver, onLogout }) {
     };
   }, [driverId, isOnline, activeOrder]);
 
-  // --------------------------------------------------------------------------
-  // 3.4 Geolocalización Continua y Tolerante a Fallos (GPS)
-  // --------------------------------------------------------------------------
+  // ----------------------------------------------------
+  // 2. GEOLOCALIZACIÓN TOLERANTE A FALLOS Y ALTA PRECISIÓN
+  // ----------------------------------------------------
   useEffect(() => {
     if (!isOnline || !("geolocation" in navigator)) return;
 
@@ -244,6 +214,7 @@ export default function DriverDashboard({ driver, onLogout }) {
       (position) => {
         const { latitude, longitude, accuracy, heading, speed } =
           position.coords;
+
         const now = Date.now();
 
         if (accuracy > 120) {
@@ -258,6 +229,7 @@ export default function DriverDashboard({ driver, onLogout }) {
             latitude,
             longitude,
           );
+
           if (dist > 200) {
             console.warn("[GPS] Salto detectado, ignorado");
             return;
@@ -270,6 +242,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         });
 
         lastValidPosition = smoothed;
+
         const interval = getDynamicInterval(speed);
 
         if (now - lastSendTime < interval) return;
@@ -277,7 +250,7 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         const locationData = {
           driverId,
-          driverName,
+          driverName: driverName,
           phone: driver?.phone || savedDriverData?.phone || "",
           lat: smoothed.lat,
           lng: smoothed.lng,
@@ -314,9 +287,9 @@ export default function DriverDashboard({ driver, onLogout }) {
     };
   }, [isOnline, driverId, driver, driverName, savedDriverData]);
 
-  // --------------------------------------------------------------------------
-  // 3.5 Consulta y Sincronización REST (Pedidos)
-  // --------------------------------------------------------------------------
+  // ----------------------------------------------------
+  // 3. CONSULTA DE PEDIDOS Y ESTADO ACTIVO
+  // ----------------------------------------------------
   const fetchOrders = useCallback(async () => {
     if (!isOnline || activeOrder) return;
     try {
@@ -372,10 +345,9 @@ export default function DriverDashboard({ driver, onLogout }) {
     return () => clearInterval(interval);
   }, [isOnline, activeOrder, fetchOrders]);
 
-  // --------------------------------------------------------------------------
-  // 3.6 Acciones de Interacción y Manejo de Peticiones
-  // --------------------------------------------------------------------------
-
+  // ----------------------------------------------------
+  // 4. ACCIONES DEL CONDUCTOR
+  // ----------------------------------------------------
   const toggleOnlineStatus = async () => {
     if (!driverId) {
       alert("Error de identificación del conductor. Vuelve a iniciar sesión.");
@@ -411,6 +383,7 @@ export default function DriverDashboard({ driver, onLogout }) {
           throw new Error("Error en actualización de estado");
       }
 
+      // 🟢 AJUSTE 2: Guardar en localStorage al cambiar exitosamente
       setIsOnline(newStatus);
       localStorage.setItem("driver_is_online", JSON.stringify(newStatus));
 
@@ -434,28 +407,33 @@ export default function DriverDashboard({ driver, onLogout }) {
   const handleAcceptOrder = async (orderId, acceptedPrice) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
+      const baseUrl =
+        import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+      const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+
+      const endpoint = cleanBaseUrl.endsWith("/api")
+        ? `${cleanBaseUrl}/orders/${orderId}/accept`
+        : `${cleanBaseUrl}/api/orders/${orderId}/accept`;
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          driverId,
+          driverId: driverId,
           price: Number(acceptedPrice),
         }),
       });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Respuesta del servidor:", errorText);
-        throw new Error(
-          `Error ${res.status}: No se encontró la ruta en el servidor.`,
-        );
-      }
+      const data = await res.json();
 
-      alert("¡Carrera aceptada con éxito!");
-      checkActiveOrder();
+      if (res.ok) {
+        alert("¡Carrera aceptada con éxito!");
+        checkActiveOrder();
+      } else {
+        alert(data.message || "No se pudo aceptar la carrera.");
+      }
     } catch (error) {
       console.error("Error al aceptar la orden:", error);
-      alert(error.message || "No se pudo aceptar la carrera.");
     } finally {
       setLoading(false);
     }
@@ -523,12 +501,12 @@ export default function DriverDashboard({ driver, onLogout }) {
     setCustomRates((prev) => ({ ...prev, [orderId]: num }));
   };
 
-  // --------------------------------------------------------------------------
-  // 3.7 Renderizado del Componente
-  // --------------------------------------------------------------------------
+  // ----------------------------------------------------
+  // 5. RENDERIZADO
+  // ----------------------------------------------------
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      {/* HEADER PRINCIPAL */}
+      {/* Header */}
       <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
         <div className="flex items-center gap-2 min-w-0">
           <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
@@ -598,7 +576,6 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       </header>
 
-      {/* Alerta GPS */}
       {geoError && (
         <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
           <AlertCircle className="w-4 h-4 flex-shrink-0" />
@@ -606,10 +583,8 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       )}
 
-      {/* CONTENIDO PRINCIPAL */}
       <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
         {activeOrder ? (
-          /* SECCIÓN A: ORDEN EN CURSO */
           <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
             <div className="flex justify-between items-start border-b border-slate-700 pb-3">
               <div>
@@ -621,7 +596,9 @@ export default function DriverDashboard({ driver, onLogout }) {
                 <h2 className="text-xl font-bold mt-2">
                   {checkIsRide(activeOrder)
                     ? "Servicio de Pasajero"
-                    : `Pedido #${String(activeOrder._id || activeOrder.id || "").slice(-4)}`}
+                    : `Pedido #${(activeOrder._id || activeOrder.id).slice(
+                        -4,
+                      )}`}
                 </h2>
               </div>
               <a
@@ -667,7 +644,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Detalles Cliente / Valor */}
+            {/* Detalles del Cliente / Valor */}
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
                 <p className="text-xs text-slate-400">Cliente</p>
@@ -693,7 +670,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             </div>
 
-            {/* Chat Integrado y PIN */}
+            {/* Chat y Finalización */}
             <div className="space-y-3 pt-2">
               <button
                 onClick={() => setIsChatOpen(!isChatOpen)}
@@ -783,7 +760,7 @@ export default function DriverDashboard({ driver, onLogout }) {
             </div>
           </div>
         ) : (
-          /* SECCIÓN B: PEDIDOS DISPONIBLES */
+          /* VISTA 2: LISTA DE PEDIDOS DISPONIBLES */
           <div className="space-y-4">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-slate-200">
@@ -816,7 +793,7 @@ export default function DriverDashboard({ driver, onLogout }) {
               </div>
             ) : (
               availableOrders.map((order) => {
-                const id = order._id || order.id || Math.random().toString();
+                const id = order._id || order.id;
                 const isRide = checkIsRide(order);
 
                 return (
@@ -847,7 +824,7 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </span>
                     </div>
 
-                    {/* Direcciones */}
+                    {/* Mapeo Múltiple de Origen y Destino */}
                     <div className="space-y-2 text-sm">
                       <div className="flex items-start space-x-2">
                         <MapPin className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
