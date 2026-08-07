@@ -157,6 +157,11 @@ function MotocarroForm({
       isMandado: false,
       store: null,
       targetDriverId: selectedDriver ? selectedDriver.driverId : null,
+
+      // 📍 Campos de Origen y Destino de primer nivel
+      origen: origen.trim(),
+      destino: destino.trim(),
+
       rideDetails: {
         passengersCount: Number(passengersCount),
         hasLuggage: Boolean(hasLuggage),
@@ -166,10 +171,8 @@ function MotocarroForm({
       customer: {
         name: nombre.trim() || "Cliente Motocarro",
         phone: phoneClean,
-        address: origen,
-        notes: `Destino: ${destino}.${
-          esAcuerdo ? " [Tarifa a convenir en Chat]" : ""
-        }`,
+        address: origen.trim(),
+        notes: destino.trim(),
       },
       items: [
         {

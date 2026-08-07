@@ -384,31 +384,36 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  const handleAcceptOrder = async (orderId) => {
-    setLoading(true);
+  const handleAcceptOrder = async (orderId, acceptedPrice) => {
     try {
-      const proposedRate = customRates[orderId];
-      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
+      const baseUrl =
+        import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+      const cleanBaseUrl = baseUrl.replace(/\/+$/, "");
+
+      // Garantizamos que incluya /api/orders
+      const endpoint = cleanBaseUrl.endsWith("/api")
+        ? `${cleanBaseUrl}/orders/${orderId}/accept`
+        : `${cleanBaseUrl}/api/orders/${orderId}/accept`;
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driverId, rate: proposedRate }),
+        body: JSON.stringify({
+          driverId: currentDriver._id, // o el ID/teléfono del conductor actual
+          price: Number(acceptedPrice),
+        }),
       });
 
       const data = await res.json();
 
-      if (!res.ok) {
-        throw new Error(data.message || "Error al aceptar el pedido.");
+      if (res.ok) {
+        alert("¡Carrera aceptada con éxito!");
+        // Actualizar estado o emitir socket si aplica
+      } else {
+        alert(data.message || "No se pudo aceptar la carrera.");
       }
-
-      setActiveOrder(data.order || data);
-      setAvailableOrders([]);
-    } catch (err) {
-      alert(
-        err.message || "Error al aceptar el pedido. Tal vez ya fue tomado.",
-      );
-      fetchOrders();
-    } finally {
-      setLoading(false);
+    } catch (error) {
+      console.error("Error al aceptar la orden:", error);
     }
   };
 
