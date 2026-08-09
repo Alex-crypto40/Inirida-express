@@ -161,64 +161,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   }, [activeOrder]);
 
-  // 🟢 FINALIZAR CARRERA CORREGIDO (ENVIANDO STATUS COMPLETED)
-  const handleCompleteOrder = async () => {
-    if (!activeOrder) return;
-    const isRide = checkIsRide(activeOrder);
-
-    if (!isRide && completionPin.length !== 4) {
-      setPinError("Ingresa el PIN de 4 dígitos enviado al cliente.");
-      return;
-    }
-
-    setLoading(true);
-    setPinError("");
-    try {
-      const orderId = activeOrder._id || activeOrder.id;
-      const res = await fetch(`${API_URL}/orders/${orderId}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          driverId,
-          status: "completed", // 👈 OBLIGATORIO para evitar error 400
-          pin: isRide ? null : completionPin,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || "Error al completar pedido.");
-
-      setActiveOrder(null);
-      setCompletionPin("");
-      fetchOrders();
-    } catch (err) {
-      setPinError(err.message);
-      alert(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // 🟢 ENVIAR MENSAJE DE CHAT
-  const handleSendMessage = (e) => {
-    e.preventDefault();
-    if (!newMessage.trim() || !activeOrder) return;
-
-    const orderId = activeOrder._id || activeOrder.id;
-    const payload = {
-      orderId,
-      senderId: driverId,
-      senderType: "driver",
-      text: newMessage.trim(),
-      timestamp: new Date(),
-    };
-
-    socketRef.current?.emit("send_chat_message", payload);
-    setChatMessages((prev) => [...prev, payload]);
-    setNewMessage("");
-  };
-
   // SOCKETS & VISIBILIDAD
   useEffect(() => {
     socketRef.current = io(SOCKET_URL, {
@@ -525,6 +467,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
+  // 🟢 FINALIZAR CARRERA (UNIFICADO Y CORREGIDO PARA EVITAR DUPLICADOS)
   const handleCompleteOrder = async () => {
     if (!activeOrder) return;
     const isRide = checkIsRide(activeOrder);
@@ -543,6 +486,7 @@ export default function DriverDashboard({ driver, onLogout }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           driverId,
+          status: "completed",
           pin: isRide ? null : completionPin,
         }),
       });
@@ -556,11 +500,13 @@ export default function DriverDashboard({ driver, onLogout }) {
       fetchOrders();
     } catch (err) {
       setPinError(err.message);
+      alert(err.message);
     } finally {
       setLoading(false);
     }
   };
 
+  // 🟢 ENVIAR MENSAJE DE CHAT
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!newMessage.trim() || !activeOrder) return;
