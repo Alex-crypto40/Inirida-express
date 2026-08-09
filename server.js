@@ -191,26 +191,62 @@ io.on("connection", (socket) => {
     );
   });
 
-  // Evento: envío de mensajes de chat
-  socket.on("send_message", async (data) => {
+  // 🟢 Unirse a la sala única del pedido (Unificado)
+  socket.on("join_order_chat", joinOrderRoomHandler);
+  socket.on("join_order_room", joinOrderRoomHandler);
+
+  function joinOrderRoomHandler(orderId) {
+    if (!orderId) return;
+    socket.join(orderId);
+    socket.join(`order_${orderId}`);
+    console.log(
+      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
+    );
+  }
+
+  // 🟢 Salir de la sala del pedido
+  socket.on("leave_order_chat", (orderId) => {
+    if (!orderId) return;
+    socket.leave(orderId);
+    socket.leave(`order_${orderId}`);
+    console.log(
+      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`,
+    );
+  });
+
+  // 🟢 Evento: envío de mensajes de chat (Soporta send_message y send_chat_message)
+  const handleSendMessage = async (data) => {
     try {
-      const { orderId, senderRole, senderName, text } = data;
+      const { orderId, text, senderRole, senderName, senderType, senderId } =
+        data;
 
       if (!orderId || !text) return;
 
+      const role = senderRole || senderType || "user";
+      const name = senderName || (role === "driver" ? "Conductor" : "Cliente");
+
       const newMessage = new Message({
         orderId,
-        senderRole,
-        senderName,
+        senderRole: role,
+        senderName: name,
+        senderId,
         text,
       });
       await newMessage.save();
 
+      // Emitir a la sala en los 3 formatos para asegurar la entrega instantánea
       io.to(orderId).to(`order_${orderId}`).emit("receive_message", newMessage);
+      io.to(orderId)
+        .to(`order_${orderId}`)
+        .emit("new_chat_message", newMessage);
+      io.to(orderId).to(`order_${orderId}`).emit("chat_message", newMessage);
     } catch (error) {
       console.error("Error al guardar/transmitir mensaje en WebSocket:", error);
     }
-  });
+  };
+
+  socket.on("send_message", handleSendMessage);
+  socket.on("send_chat_message", handleSendMessage);
 
   // Desconexión con tolerancia a parpadeos de red móvil
   socket.on("disconnect", () => {

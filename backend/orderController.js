@@ -157,7 +157,9 @@ export const takeOrder = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { status, pin } = req.body;
+    // 🟢 Si el body no especifica status, asumimos "completed" por venir del endpoint /complete
+    const status = req.body.status || "completed";
+    const { pin } = req.body;
     const driverId = req.user?._id || req.body.driverId;
 
     const validStatuses = ["at_store", "on_the_way", "completed", "cancelled"];
@@ -200,7 +202,12 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    const isRide = order.serviceType === "ride";
+    // 🟢 Detección ampliada para eximir del PIN a cualquier tipo de carrera
+    const isRide =
+      order.serviceType === "ride" ||
+      order.serviceType === "carrerita" ||
+      order.serviceType === "pasajero" ||
+      order.serviceType === "motocarro";
 
     if (status === "completed" && !isRide) {
       if (!pin) {

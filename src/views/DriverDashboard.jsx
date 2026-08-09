@@ -72,12 +72,14 @@ export default function DriverDashboard({ driver, onLogout }) {
     localStorage.getItem("driverData") || "{}",
   );
 
+  // 🟢 PRIORIZAR LOCALSTORAGE O PROP DE MANERA ROBUSTA
   const driverId =
     driver?.id ||
     driver?._id ||
     driver?.driverId ||
     savedDriverData?.id ||
     savedDriverData?._id ||
+    savedDriverData?.driverId ||
     localStorage.getItem("driverId");
 
   const driverName =
@@ -92,8 +94,9 @@ export default function DriverDashboard({ driver, onLogout }) {
   useEffect(() => {
     if (driver && Object.keys(driver).length > 0) {
       localStorage.setItem("driverData", JSON.stringify(driver));
-      if (driver.id || driver._id) {
-        localStorage.setItem("driverId", driver.id || driver._id);
+      const idToSave = driver.id || driver._id || driver.driverId;
+      if (idToSave) {
+        localStorage.setItem("driverId", idToSave);
       }
     }
   }, [driver]);
@@ -137,6 +140,83 @@ export default function DriverDashboard({ driver, onLogout }) {
       type === "motocarro" ||
       type === "ride"
     );
+  };
+
+  // 🟢 SUSCRIPCIÓN DEL CHAT Y SALA SOCKET AL TENER ORDEN ACTIVA
+  useEffect(() => {
+    if (activeOrder && socketRef.current) {
+      const orderId = activeOrder._id || activeOrder.id;
+
+      // Unirse a las salas del socket para recibir mensajes
+      socketRef.current.emit("join_order_room", orderId);
+      socketRef.current.emit("join_room", `order_${orderId}`);
+
+      // Obtener el historial inicial de mensajes del pedido
+      fetch(`${API_URL}/orders/${orderId}/messages`)
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => {
+          if (Array.isArray(data)) setChatMessages(data);
+        })
+        .catch((err) => console.error("Error al cargar chat:", err));
+    }
+  }, [activeOrder]);
+
+  // 🟢 FINALIZAR CARRERA CORREGIDO (ENVIANDO STATUS COMPLETED)
+  const handleCompleteOrder = async () => {
+    if (!activeOrder) return;
+    const isRide = checkIsRide(activeOrder);
+
+    if (!isRide && completionPin.length !== 4) {
+      setPinError("Ingresa el PIN de 4 dígitos enviado al cliente.");
+      return;
+    }
+
+    setLoading(true);
+    setPinError("");
+    try {
+      const orderId = activeOrder._id || activeOrder.id;
+      const res = await fetch(`${API_URL}/orders/${orderId}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          driverId,
+          status: "completed", // 👈 OBLIGATORIO para evitar error 400
+          pin: isRide ? null : completionPin,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok)
+        throw new Error(data.message || "Error al completar pedido.");
+
+      setActiveOrder(null);
+      setCompletionPin("");
+      fetchOrders();
+    } catch (err) {
+      setPinError(err.message);
+      alert(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🟢 ENVIAR MENSAJE DE CHAT
+  const handleSendMessage = (e) => {
+    e.preventDefault();
+    if (!newMessage.trim() || !activeOrder) return;
+
+    const orderId = activeOrder._id || activeOrder.id;
+    const payload = {
+      orderId,
+      senderId: driverId,
+      senderType: "driver",
+      text: newMessage.trim(),
+      timestamp: new Date(),
+    };
+
+    socketRef.current?.emit("send_chat_message", payload);
+    setChatMessages((prev) => [...prev, payload]);
+    setNewMessage("");
   };
 
   // SOCKETS & VISIBILIDAD
