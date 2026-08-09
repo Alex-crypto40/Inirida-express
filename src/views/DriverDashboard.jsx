@@ -12,6 +12,8 @@ import {
   Send,
   MessageSquare,
   CheckCircle2,
+  Loader2,
+  XCircle,
 } from "lucide-react";
 
 // ============================================================================
@@ -72,7 +74,6 @@ export default function DriverDashboard({ driver, onLogout }) {
     localStorage.getItem("driverData") || "{}",
   );
 
-  // PRIORIZAR LOCALSTORAGE O PROP DE MANERA ROBUSTA
   const driverId =
     driver?.id ||
     driver?._id ||
@@ -118,6 +119,7 @@ export default function DriverDashboard({ driver, onLogout }) {
   const [activeOrder, setActiveOrder] = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
   const [customRates, setCustomRates] = useState({});
+  const [pendingOffers, setPendingOffers] = useState({}); // Control de ofertas enviadas
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -142,7 +144,7 @@ export default function DriverDashboard({ driver, onLogout }) {
     );
   };
 
-  // SUSCRIPCIÓN DEL CHAT Y SALA SOCKET AL TENER ORDEN ACTIVA
+  // CHAT & ROOM SUBSCRIPTION
   useEffect(() => {
     if (activeOrder && socketRef.current) {
       const orderId = activeOrder._id || activeOrder.id;
@@ -197,6 +199,11 @@ export default function DriverDashboard({ driver, onLogout }) {
       setAvailableOrders((prev) =>
         prev.filter((o) => (o._id || o.id) !== takenOrderId),
       );
+      setPendingOffers((prev) => {
+        const copy = { ...prev };
+        delete copy[takenOrderId];
+        return copy;
+      });
     });
 
     socketRef.current.on("order_updated", (updatedOrder) => {
@@ -220,6 +227,29 @@ export default function DriverDashboard({ driver, onLogout }) {
           setActiveOrder(null);
         }
       }
+    });
+
+    // EVENTOS DE CONTRAOFERTA EN TIEMPO REAL
+    socketRef.current.on("counter_offer_accepted", ({ orderId, order }) => {
+      setPendingOffers((prev) => {
+        const copy = { ...prev };
+        delete copy[orderId];
+        return copy;
+      });
+      if (order) {
+        setActiveOrder(order);
+      } else {
+        checkActiveOrder();
+      }
+    });
+
+    socketRef.current.on("counter_offer_rejected", ({ orderId, message }) => {
+      setPendingOffers((prev) => {
+        const copy = { ...prev };
+        delete copy[orderId];
+        return copy;
+      });
+      alert(message || "El cliente rechazó tu oferta de tarifa.");
     });
 
     socketRef.current.on("new_chat_message", (msg) => {
@@ -440,27 +470,85 @@ export default function DriverDashboard({ driver, onLogout }) {
     }
   };
 
-  const handleAcceptOrder = async (orderId, acceptedPrice) => {
+  // ENVIAR CONTRAOFERTA / ACEPTAR TARIFAS
+  const handleOfferOrAccept = async (order, proposedPrice) => {
+    const orderId = order._id || order.id;
+    const basePrice =
+      order.offeredRate ||
+      order.subtotal ||
+      order.total ||
+      order.deliveryFee ||
+      0;
+    const finalPrice = Number(proposedPrice);
+
     setLoading(true);
+
+    // Si la tarifa no cambió, acepta la orden de inmediato
+    if (finalPrice === basePrice) {
+      try {
+        const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            driverId,
+            price: finalPrice,
+          }),
+        });
+
+        if (!res.ok) throw new Error("No se pudo aceptar la carrera.");
+        checkActiveOrder();
+      } catch (error) {
+        console.error("Error al aceptar la orden:", error);
+        alert(error.message || "No se pudo aceptar la carrera.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
+    // Si cambió el precio, se envía la contraoferta al cliente
     try {
-      const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
+      const offerPayload = {
+        orderId,
+        driverId,
+        driverName,
+        offeredRate: finalPrice,
+        originalRate: basePrice,
+      };
+
+      if (socketRef.current?.connected) {
+        socketRef.current.emit("send_counter_offer", offerPayload);
+      }
+
+      const res = await fetch(`${API_URL}/orders/${orderId}/counter-offer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          driverId,
-          price: Number(acceptedPrice),
-        }),
+        body: JSON.stringify(offerPayload),
       });
 
-      if (!res.ok) throw new Error("No se pudo aceptar la carrera.");
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Error al enviar la propuesta.");
+      }
 
-      alert("¡Carrera aceptada con éxito!");
-      checkActiveOrder();
-    } catch (error) {
-      console.error("Error al aceptar la orden:", error);
-      alert(error.message || "No se pudo aceptar la carrera.");
+      setPendingOffers((prev) => ({ ...prev, [orderId]: finalPrice }));
+    } catch (err) {
+      console.error("Error enviando propuesta:", err);
+      alert(err.message || "No se pudo enviar la contraoferta.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCancelOffer = (orderId) => {
+    setPendingOffers((prev) => {
+      const copy = { ...prev };
+      delete copy[orderId];
+      return copy;
+    });
+
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("cancel_counter_offer", { orderId, driverId });
     }
   };
 
@@ -810,13 +898,21 @@ export default function DriverDashboard({ driver, onLogout }) {
               availableOrders.map((order) => {
                 const id = order._id || order.id || Math.random().toString();
                 const isRide = checkIsRide(order);
+                const hasPendingOffer = pendingOffers[id] !== undefined;
+                const basePrice =
+                  order.offeredRate ||
+                  order.subtotal ||
+                  order.total ||
+                  order.deliveryFee ||
+                  0;
+                const currentRate = customRates[id] ?? basePrice;
+                const isCustomRate = currentRate !== basePrice;
 
                 return (
                   <div
                     key={id}
                     className="bg-slate-800/90 border border-slate-700/70 rounded-xl p-3 space-y-2 hover:border-amber-500/40 transition-all shadow-md"
                   >
-                    {/* Encabezado: Tipo y Tarifa Sugerida */}
                     <div className="flex justify-between items-center gap-2">
                       <span
                         className={`text-[11px] px-2 py-0.5 rounded-md font-semibold tracking-wide border ${
@@ -832,20 +928,11 @@ export default function DriverDashboard({ driver, onLogout }) {
                           Sugerido
                         </span>
                         <span className="text-xs font-bold font-mono text-slate-200">
-                          $
-                          {(
-                            order.offeredRate ||
-                            order.subtotal ||
-                            order.total ||
-                            order.deliveryFee ||
-                            0
-                          ).toLocaleString()}{" "}
-                          COP
+                          ${basePrice.toLocaleString()} COP
                         </span>
                       </div>
                     </div>
 
-                    {/* Ruta compacta */}
                     <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/80 space-y-1.5 text-xs">
                       <div className="flex items-center space-x-2 min-w-0">
                         <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
@@ -875,35 +962,57 @@ export default function DriverDashboard({ driver, onLogout }) {
                       </div>
                     </div>
 
-                    {/* Controles de Tarifa y Aceptar */}
-                    <div className="pt-1 flex items-center gap-2">
-                      <div className="relative flex-1">
-                        <DollarSign className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="number"
-                          value={customRates[id] || ""}
-                          onChange={(e) => handleRateChange(id, e.target.value)}
-                          placeholder="Tu tarifa"
-                          className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-7 pr-2 py-1.5 text-xs font-bold text-emerald-400 focus:outline-none focus:border-amber-400 transition-colors"
-                        />
+                    {/* VISTA SEGÚN EL ESTADO DE CONTRAOFERTA */}
+                    {hasPendingOffer ? (
+                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                        <div className="flex items-center space-x-2 min-w-0">
+                          <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
+                          <div className="truncate">
+                            <p className="text-xs font-semibold text-amber-300 truncate">
+                              Esperando al cliente...
+                            </p>
+                            <p className="text-[10px] text-amber-400/80 font-mono">
+                              Oferta: ${pendingOffers[id].toLocaleString()} COP
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleCancelOffer(id)}
+                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors shrink-0"
+                          title="Cancelar propuesta"
+                        >
+                          <XCircle className="w-4 h-4" />
+                        </button>
                       </div>
-                      <button
-                        onClick={() =>
-                          handleAcceptOrder(
-                            id,
-                            customRates[id] ||
-                              order.offeredRate ||
-                              order.subtotal ||
-                              order.total ||
-                              0,
-                          )
-                        }
-                        disabled={loading}
-                        className="px-4 py-1.5 bg-amber-500 hover:bg-amber-400 active:scale-95 text-slate-950 font-bold rounded-lg text-xs transition-all shadow-md shadow-amber-500/10 shrink-0"
-                      >
-                        Aceptar
-                      </button>
-                    </div>
+                    ) : (
+                      <div className="pt-1 flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <DollarSign className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="number"
+                            value={customRates[id] ?? ""}
+                            onChange={(e) =>
+                              handleRateChange(id, e.target.value)
+                            }
+                            placeholder="Tu tarifa"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-7 pr-2 py-1.5 text-xs font-bold text-emerald-400 focus:outline-none focus:border-amber-400 transition-colors"
+                          />
+                        </div>
+                        <button
+                          onClick={() =>
+                            handleOfferOrAccept(order, currentRate)
+                          }
+                          disabled={loading}
+                          className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all shadow-md shrink-0 active:scale-95 ${
+                            isCustomRate
+                              ? "bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/10"
+                              : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/10"
+                          }`}
+                        >
+                          {isCustomRate ? "Enviar Oferta" : "Aceptar"}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })
