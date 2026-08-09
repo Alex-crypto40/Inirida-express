@@ -179,6 +179,30 @@ export default function DriverDashboard({ driver, onLogout }) {
       );
     });
 
+    // 🟢 Listener para cambios de estado/asignación de orden
+    socketRef.current.on("order_updated", (updatedOrder) => {
+      const updatedId = updatedOrder._id || updatedOrder.id;
+      const currentDriverId = driverId;
+
+      if (
+        updatedOrder.driverId === currentDriverId ||
+        updatedOrder.driver?._id === currentDriverId
+      ) {
+        if (
+          ["accepted", "en_camino", "in_progress", "assigned"].includes(
+            updatedOrder.status,
+          )
+        ) {
+          setActiveOrder(updatedOrder);
+          setAvailableOrders((prev) =>
+            prev.filter((o) => (o._id || o.id) !== updatedId),
+          );
+        } else if (["completed", "cancelled"].includes(updatedOrder.status)) {
+          setActiveOrder(null);
+        }
+      }
+    });
+
     socketRef.current.on("new_chat_message", (msg) => {
       setChatMessages((prev) => [...prev, msg]);
     });
@@ -273,15 +297,17 @@ export default function DriverDashboard({ driver, onLogout }) {
     };
   }, [isOnline, driverId, driver, driverName, savedDriverData]);
 
-  // PETICIONES API (CON VALIDACIÓN ESTRECHA DE activeOrder)
+  // PETICIONES API
   const fetchOrders = useCallback(async () => {
-    if (!isOnline || activeOrder) return;
+    if (!isOnline) return;
     try {
       const res = await fetch(`${API_URL}/orders/available`);
       if (!res.ok) throw new Error("Error en la solicitud de pedidos");
       const orders = await res.json();
 
-      setAvailableOrders(orders || []);
+      if (!activeOrder) {
+        setAvailableOrders(orders || []);
+      }
 
       setCustomRates((prev) => {
         const updated = { ...prev };
@@ -309,9 +335,9 @@ export default function DriverDashboard({ driver, onLogout }) {
       const res = await fetch(`${API_URL}/orders/active/driver/${driverId}`);
       if (res.ok) {
         const data = await res.json();
-        // VALIDACIÓN: Evitar que data {} sea tratada como orden válida
         if (data && (data._id || data.id)) {
           setActiveOrder(data);
+          setAvailableOrders([]);
         } else {
           setActiveOrder(null);
         }
@@ -330,12 +356,19 @@ export default function DriverDashboard({ driver, onLogout }) {
 
   useEffect(() => {
     let interval;
-    if (isOnline && !activeOrder) {
-      fetchOrders();
-      interval = setInterval(fetchOrders, 6000);
+    if (isOnline) {
+      if (activeOrder) {
+        checkActiveOrder();
+      } else {
+        fetchOrders();
+      }
+      interval = setInterval(() => {
+        checkActiveOrder();
+        if (!activeOrder) fetchOrders();
+      }, 5000);
     }
     return () => clearInterval(interval);
-  }, [isOnline, activeOrder, fetchOrders]);
+  }, [isOnline, activeOrder, fetchOrders, checkActiveOrder]);
 
   // ACCIONES
   const toggleOnlineStatus = async () => {
