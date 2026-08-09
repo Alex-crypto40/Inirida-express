@@ -167,20 +167,22 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 🟢 Unirse a la sala única del pedido (Soporta múltiples eventos de suscripción)
+  // 🟢 Unirse a la sala única del pedido
   const joinOrderRoomHandler = (orderId) => {
     if (!orderId) return;
     const cleanId = String(orderId).replace(/^order_/, "");
-    socket.join(cleanId);
-    socket.join(`order_${cleanId}`);
-    console.log(
-      `📌 Socket ${socket.id} ingresó al canal del pedido: ${cleanId}`,
-    );
-  };
 
+    // Evitamos suscribir si el socket ya está en la sala
+    if (!socket.rooms.has(cleanId)) {
+      socket.join(cleanId);
+      socket.join(`order_${cleanId}`);
+      console.log(
+        `📌 Socket ${socket.id} ingresó al canal del pedido: ${cleanId}`,
+      );
+    }
+  };
+  // Escucha solo un evento estandarizado para evitar ejecuciones dobles
   socket.on("join_order", joinOrderRoomHandler);
-  socket.on("join_order_chat", joinOrderRoomHandler);
-  socket.on("join_order_room", joinOrderRoomHandler);
 
   // 🟢 Salir de la sala del pedido
   const leaveOrderRoomHandler = (orderId) => {

@@ -75,12 +75,17 @@ const OrderChatModal = ({
     });
 
     const joinRoom = () => {
-      socketRef.current.emit("join_order_chat", orderId);
+      if (socketRef.current) {
+        // Emitimos solo la clave principal estandarizada
+        socketRef.current.emit("join_order", orderId);
+      }
     };
 
+    // Escuchamos conexión y reconexión de red
     socketRef.current.on("connect", joinRoom);
-    joinRoom();
+    socketRef.current.io.on("reconnect", joinRoom);
 
+    // Manejador único de mensajes entrantes
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
         const isDuplicate = prev.some((m) => {
@@ -99,19 +104,15 @@ const OrderChatModal = ({
       });
     };
 
+    // Escuchar ÚNICAMENTE el evento estándar para evitar disparos cuádruples
     socketRef.current.on("receive_message", handleReceiveMessage);
-    socketRef.current.on("new_message", handleReceiveMessage);
-    socketRef.current.on("chat_message", handleReceiveMessage);
-    socketRef.current.on("new_chat_message", handleReceiveMessage);
 
     return () => {
       if (socketRef.current) {
-        socketRef.current.emit("leave_order_chat", orderId);
+        socketRef.current.emit("leave_order", orderId);
         socketRef.current.off("receive_message", handleReceiveMessage);
-        socketRef.current.off("new_message", handleReceiveMessage);
-        socketRef.current.off("chat_message", handleReceiveMessage);
-        socketRef.current.off("new_chat_message", handleReceiveMessage);
         socketRef.current.off("connect", joinRoom);
+        socketRef.current.io.off("reconnect", joinRoom);
         socketRef.current.disconnect();
       }
     };
