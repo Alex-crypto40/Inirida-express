@@ -468,3 +468,85 @@ export const updateDriverLocation = async (req, res) => {
     res.status(500).json({ message: "Error al actualizar la ubicación GPS." });
   }
 };
+// 12. Responder a una Contraoferta (Cliente Acepta o Rechaza)
+export const respondCounterOffer = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { action, driverId, proposedPrice } = req.body; // action: "accept" o "reject"
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Solicitud no encontrada." });
+    }
+
+    if (action === "accept") {
+      // Actualizar el costo de envío, total, asignar conductor y cambiar estado
+      order.deliveryFee = Number(proposedPrice);
+      order.total = (order.subtotal || 0) + Number(proposedPrice);
+      order.driver = driverId;
+      order.status = "assigned";
+
+      // Marcar la contraoferta como aceptada en el historial
+      if (order.counterOffers && order.counterOffers.length > 0) {
+        order.counterOffers = order.counterOffers.map((offer) => {
+          if (offer.driverId?.toString() === driverId?.toString()) {
+            return { ...offer.toObject(), status: "accepted" };
+          }
+          return { ...offer.toObject(), status: "rejected" };
+        });
+      }
+
+      await order.save();
+
+      const populatedOrder = await Order.findById(order._id)
+        .populate("store", "name address phone")
+        .populate("driver", "name phone vehicleType vehiclePlate");
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`order_${orderId}`).emit("counter_offer_accepted", {
+          orderId,
+          order: populatedOrder,
+        });
+        io.to(`order_${orderId}`).emit("order:status_updated", populatedOrder);
+        io.to(`order_${orderId}`).emit("orderUpdated", populatedOrder);
+        io.emit("order_status_updated", populatedOrder);
+        io.emit("order:taken", { orderId: order._id, driverId });
+      }
+
+      return res.json({
+        message: "¡Contraoferta aceptada! El servicio ha sido asignado. 🚕",
+        order: populatedOrder,
+      });
+    } else if (action === "reject") {
+      // Marcar como rechazada
+      if (order.counterOffers && order.counterOffers.length > 0) {
+        order.counterOffers = order.counterOffers.map((offer) => {
+          if (offer.driverId?.toString() === driverId?.toString()) {
+            return { ...offer.toObject(), status: "rejected" };
+          }
+          return offer;
+        });
+      }
+
+      await order.save();
+
+      const io = req.app.get("io");
+      if (io) {
+        io.to(`order_${orderId}`).emit("counter_offer_rejected", {
+          orderId,
+          driverId,
+        });
+      }
+
+      return res.json({ message: "Contraoferta rechazada.", order });
+    } else {
+      return res.status(400).json({ message: "Acción no válida." });
+    }
+  } catch (error) {
+    console.error("Error al responder la contraoferta:", error);
+    res
+      .status(500)
+      .json({ message: "Error interno al procesar la respuesta." });
+  }
+};

@@ -7,6 +7,7 @@ import {
   getOrderMessages,
   takeOrder,
   sendCounterOffer,
+  respondCounterOffer,
   updateOrderStatus,
   updateDriverLocation,
   rateOrder,
@@ -46,6 +47,12 @@ router.post("/:orderId/accept", takeOrder);
 // NUEVO: El frontend hace POST a /complete para verificar el PIN y finalizar.
 // Asigna esto a tu controlador de finalización (ej: completeOrder o updateOrderStatus)
 router.post("/:orderId/complete", updateOrderStatus);
+
+// 🤝 CONTRAOFERTAS
+router.post("/:orderId/counter-offer", sendCounterOffer);
+// 👈 2. Nueva ruta para que el cliente Acepte o Rechace la propuesta
+router.post("/:orderId/respond-counter", respondCounterOffer);
+router.patch("/:orderId/respond-counter", respondCounterOffer);
 
 // Enviar contraoferta al cliente (Motocarros / Domiciliarios)
 router.post("/:orderId/counter-offer", sendCounterOffer);

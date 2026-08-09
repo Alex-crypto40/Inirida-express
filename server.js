@@ -36,7 +36,6 @@ if (process.env.CLIENT_URL) {
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permitir peticiones sin origen (como clientes móviles, postman o el mismo servidor)
     if (
       !origin ||
       allowedOrigins.includes(origin) ||
@@ -44,7 +43,7 @@ const corsOptions = {
     ) {
       callback(null, true);
     } else {
-      callback(null, true); // Permite acceso para desarrollo
+      callback(null, true);
     }
   },
   credentials: true,
@@ -65,18 +64,17 @@ if (fs.existsSync(distPath)) {
 // 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
 
-// Configuración de Socket.io adaptada a redes inestables (Inírida / Cobertura Móvil Débil)
+// Configuración de Socket.io adaptada a redes inestables
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => callback(null, true),
     methods: ["GET", "POST"],
     credentials: true,
   },
-  // Inicia por 'polling' para asegurar handshake sobre redes débiles y escala a 'websocket'
   transports: ["polling", "websocket"],
-  pingTimeout: 90000, // 90 segundos de tolerancia a microcortes de red antes de declarar desconexión
-  pingInterval: 25000, // Heartbeat cada 25 segundos para mantener viva la ruta de red
-  connectTimeout: 45000, // Tiempo límite para completar la conexión inicial
+  pingTimeout: 90000,
+  pingInterval: 25000,
+  connectTimeout: 45000,
 });
 
 // 🔑 Inyectamos 'io' en Express
@@ -148,7 +146,6 @@ io.on("connection", (socket) => {
         Array.from(activeDriversLocations.values()),
       );
     } else {
-      // Si se desactiva o toma carrera, se remueve del mapa público
       activeDriversLocations.delete(driverId);
       io.emit("driver_disconnected_location", { driverId });
       io.emit(
@@ -158,7 +155,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  // 🎯 Notificación de Solicitud Directa al Motocarro Seleccionado en el Mapa
+  // 🎯 Notificación de Solicitud Directa al Motocarro Seleccionado
   socket.on("send_direct_order_request", (data) => {
     const { targetDriverId, order } = data;
     const targetDriver = activeDriversLocations.get(targetDriverId);
@@ -166,55 +163,40 @@ io.on("connection", (socket) => {
     if (targetDriver && targetDriver.socketId) {
       io.to(targetDriver.socketId).emit("direct_order_received", order);
     } else {
-      // Si el conductor se desconectó, reenviar la orden al canal general
       io.emit("order:created", order);
     }
   });
 
-  // Unirse a la sala única del pedido
-  socket.on("join_order_chat", (orderId) => {
+  // 🟢 Unirse a la sala única del pedido (Soporta múltiples eventos de suscripción)
+  const joinOrderRoomHandler = (orderId) => {
     if (!orderId) return;
-    socket.join(orderId);
-    socket.join(`order_${orderId}`);
+    const cleanId = String(orderId).replace(/^order_/, "");
+    socket.join(cleanId);
+    socket.join(`order_${cleanId}`);
     console.log(
-      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
+      `📌 Socket ${socket.id} ingresó al canal del pedido: ${cleanId}`,
     );
-  });
+  };
 
-  // Salir de la sala del pedido
-  socket.on("leave_order_chat", (orderId) => {
-    if (!orderId) return;
-    socket.leave(orderId);
-    socket.leave(`order_${orderId}`);
-    console.log(
-      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`,
-    );
-  });
-
-  // 🟢 Unirse a la sala única del pedido (Unificado)
+  socket.on("join_order", joinOrderRoomHandler);
   socket.on("join_order_chat", joinOrderRoomHandler);
   socket.on("join_order_room", joinOrderRoomHandler);
 
-  function joinOrderRoomHandler(orderId) {
-    if (!orderId) return;
-    socket.join(orderId);
-    socket.join(`order_${orderId}`);
-    console.log(
-      `📌 Socket ${socket.id} ingresó al canal del pedido: ${orderId}`,
-    );
-  }
-
   // 🟢 Salir de la sala del pedido
-  socket.on("leave_order_chat", (orderId) => {
+  const leaveOrderRoomHandler = (orderId) => {
     if (!orderId) return;
-    socket.leave(orderId);
-    socket.leave(`order_${orderId}`);
+    const cleanId = String(orderId).replace(/^order_/, "");
+    socket.leave(cleanId);
+    socket.leave(`order_${cleanId}`);
     console.log(
-      `👋 Socket ${socket.id} salió del canal del pedido: ${orderId}`,
+      `👋 Socket ${socket.id} salió del canal del pedido: ${cleanId}`,
     );
-  });
+  };
 
-  // 🟢 Evento: envío de mensajes de chat (Soporta send_message y send_chat_message)
+  socket.on("leave_order", leaveOrderRoomHandler);
+  socket.on("leave_order_chat", leaveOrderRoomHandler);
+
+  // 🟢 Evento: envío de mensajes de chat
   const handleSendMessage = async (data) => {
     try {
       const { orderId, text, senderRole, senderName, senderType, senderId } =
@@ -222,11 +204,12 @@ io.on("connection", (socket) => {
 
       if (!orderId || !text) return;
 
+      const cleanOrderId = String(orderId).replace(/^order_/, "");
       const role = senderRole || senderType || "user";
       const name = senderName || (role === "driver" ? "Conductor" : "Cliente");
 
       const newMessage = new Message({
-        orderId,
+        orderId: cleanOrderId,
         senderRole: role,
         senderName: name,
         senderId,
@@ -234,12 +217,22 @@ io.on("connection", (socket) => {
       });
       await newMessage.save();
 
-      // Emitir a la sala en los 3 formatos para asegurar la entrega instantánea
-      io.to(orderId).to(`order_${orderId}`).emit("receive_message", newMessage);
-      io.to(orderId)
-        .to(`order_${orderId}`)
+      // Emitir a la sala en los formatos soportados
+      io.to(cleanOrderId)
+        .to(`order_${cleanOrderId}`)
+        .emit("receive_message", newMessage);
+
+      io.to(cleanOrderId)
+        .to(`order_${cleanOrderId}`)
         .emit("new_chat_message", newMessage);
-      io.to(orderId).to(`order_${orderId}`).emit("chat_message", newMessage);
+
+      io.to(cleanOrderId)
+        .to(`order_${cleanOrderId}`)
+        .emit("chat_message", newMessage);
+
+      io.to(cleanOrderId)
+        .to(`order_${cleanOrderId}`)
+        .emit("new_message", newMessage);
     } catch (error) {
       console.error("Error al guardar/transmitir mensaje en WebSocket:", error);
     }
@@ -252,12 +245,9 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     console.log(`❌ Usuario desconectado del WebSocket: ${socket.id}`);
 
-    // Damos un pequeño margen de gracia de 15 segundos antes de borrar al motocarro del mapa
-    // en caso de que sea solo una reconexión rápida por cambio de celda de antena.
     setTimeout(() => {
       for (const [driverId, info] of activeDriversLocations.entries()) {
         if (info.socketId === socket.id) {
-          // Si en los últimos 15s no volvió a actualizar su socketId
           const timeDiff = new Date() - new Date(info.updatedAt);
           if (timeDiff >= 15000) {
             activeDriversLocations.delete(driverId);
@@ -280,7 +270,7 @@ app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
 
-// 🌐 Ruta comodín para Single Page Application (Ignorando rutas que inicien con /socket.io/)
+// 🌐 Ruta comodín para SPA
 app.get(/^(?!\/socket\.io\/).*/, (req, res) => {
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {
@@ -294,7 +284,7 @@ app.get(/^(?!\/socket\.io\/).*/, (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Inicializamos primero la base de datos y luego el servidor
+// Inicializamos base de datos y servidor
 const startServer = async () => {
   try {
     await connectDB();

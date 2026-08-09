@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-const RAW_API = import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+const RAW_API =
+  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
 const BASE_URL = RAW_API.replace(/\/api\/?$/, "");
 
 const OrderChatModal = ({
@@ -45,14 +46,14 @@ const OrderChatModal = ({
     const fetchHistory = async () => {
       try {
         const response = await fetch(
-          `${BASE_URL}/api/orders/${orderId}/messages`
+          `${BASE_URL}/api/orders/${orderId}/messages`,
         );
         if (response.ok) {
           const data = await response.json();
           setMessages(Array.isArray(data) ? data : []);
         } else {
           const legacyRes = await fetch(
-            `${BASE_URL}/orders/${orderId}/messages`
+            `${BASE_URL}/orders/${orderId}/messages`,
           );
           if (legacyRes.ok) {
             const legacyData = await legacyRes.json();
@@ -66,15 +67,19 @@ const OrderChatModal = ({
 
     fetchHistory();
 
-    // Conexión Socket.io
+    // Conexión Socket.io con reintento adaptable
     socketRef.current = io(BASE_URL, {
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
+      transports: ["polling", "websocket"],
+      reconnectionAttempts: 10,
+      pingTimeout: 90000,
     });
 
-    socketRef.current.emit("join_order_chat", orderId);
-    socketRef.current.emit("join_order", `order_${orderId}`);
-    socketRef.current.emit("join_order", orderId);
+    const joinRoom = () => {
+      socketRef.current.emit("join_order_chat", orderId);
+    };
+
+    socketRef.current.on("connect", joinRoom);
+    joinRoom();
 
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
@@ -84,7 +89,7 @@ const OrderChatModal = ({
           const sameRole = m.senderRole === newMessage.senderRole;
           const timeDiff = Math.abs(
             new Date(m.createdAt || Date.now()) -
-              new Date(newMessage.createdAt || Date.now())
+              new Date(newMessage.createdAt || Date.now()),
           );
           return sameText && sameRole && timeDiff < 2000;
         });
@@ -96,11 +101,17 @@ const OrderChatModal = ({
 
     socketRef.current.on("receive_message", handleReceiveMessage);
     socketRef.current.on("new_message", handleReceiveMessage);
+    socketRef.current.on("chat_message", handleReceiveMessage);
+    socketRef.current.on("new_chat_message", handleReceiveMessage);
 
     return () => {
       if (socketRef.current) {
+        socketRef.current.emit("leave_order_chat", orderId);
         socketRef.current.off("receive_message", handleReceiveMessage);
         socketRef.current.off("new_message", handleReceiveMessage);
+        socketRef.current.off("chat_message", handleReceiveMessage);
+        socketRef.current.off("new_chat_message", handleReceiveMessage);
+        socketRef.current.off("connect", joinRoom);
         socketRef.current.disconnect();
       }
     };
@@ -116,7 +127,7 @@ const OrderChatModal = ({
     if (!cleanText) return;
 
     const messageData = {
-      _id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      _id: `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       orderId,
       senderRole: role,
       senderName: name,

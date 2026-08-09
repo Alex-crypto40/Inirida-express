@@ -18,6 +18,17 @@ export default function OrderStatusWidget({
 
   const showChatRef = useRef(showChat);
 
+  const checkIsRide = (order) => {
+    if (!order) return false;
+    const type = order.orderType || order.serviceType;
+    return (
+      type === "carrerita" ||
+      type === "pasajero" ||
+      type === "motocarro" ||
+      type === "ride"
+    );
+  };
+
   useEffect(() => {
     showChatRef.current = showChat;
     if (showChat) {
@@ -96,6 +107,7 @@ export default function OrderStatusWidget({
 
     socket.emit("join_order", `order_${orderId}`);
     socket.emit("join_order", orderId);
+    socket.emit("join_order_room", orderId);
 
     const handleOrderUpdate = (updatedOrder) => {
       if (!updatedOrder) return;
@@ -134,6 +146,7 @@ export default function OrderStatusWidget({
       if (
         msg &&
         (msg.senderRole === "customer" ||
+          msg.senderType === "customer" ||
           msg.sender === "customer" ||
           msg.senderRole === "client")
       ) {
@@ -161,6 +174,7 @@ export default function OrderStatusWidget({
     socket.on("counter_offer_received", handleOrderUpdate);
     socket.on("counterOffer", handleOrderUpdate);
     socket.on("new_message", handleNewChatMessage);
+    socket.on("new_chat_message", handleNewChatMessage);
     socket.on("receive_message", handleNewChatMessage);
     socket.on("chat_message", handleNewChatMessage);
 
@@ -175,6 +189,7 @@ export default function OrderStatusWidget({
       socket.off("counter_offer_received", handleOrderUpdate);
       socket.off("counterOffer", handleOrderUpdate);
       socket.off("new_message", handleNewChatMessage);
+      socket.off("new_chat_message", handleNewChatMessage);
       socket.off("receive_message", handleNewChatMessage);
       socket.off("chat_message", handleNewChatMessage);
       socket.disconnect();
@@ -182,6 +197,8 @@ export default function OrderStatusWidget({
   }, [activeOrder?._id]);
 
   if (!activeOrder) return null;
+
+  const isRide = checkIsRide(activeOrder);
 
   // Lógica de datos de la carrera
   const counterOffers = activeOrder.counterOffers || [];
@@ -264,8 +281,7 @@ export default function OrderStatusWidget({
       }
     } catch {
       alert("Error de conexión al cancelar.");
-    }
-    fontFinally: {
+    } finally {
       setLoadingAction(false);
     }
   };
@@ -437,8 +453,9 @@ export default function OrderStatusWidget({
 
         {/* Conductor en camino */}
         {isAccepted && (
-          <div className="space-y-3 mt-1">
-            {pinCode && (
+          <div className="space-y-2.5 mt-1">
+            {/* MOSTRAR PIN SOLO SI NO ES UNA CARRERA */}
+            {!isRide && pinCode && (
               <div className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl p-2.5 text-center shadow-sm">
                 <span className="text-[10px] font-bold uppercase tracking-wider block opacity-90">
                   Tu PIN de Seguridad
@@ -452,7 +469,7 @@ export default function OrderStatusWidget({
               </div>
             )}
 
-            <div className="bg-gradient-to-br from-gray-50 to-orange-50/30 p-3 rounded-2xl border border-orange-100 text-xs space-y-1.5 shadow-xs">
+            <div className="bg-gradient-to-br from-gray-50 to-orange-50/30 p-2.5 rounded-2xl border border-orange-100 text-xs space-y-1.5 shadow-xs">
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-gray-500 font-medium">👤 Conductor:</span>
                 <strong className="text-gray-900 font-bold text-sm">
@@ -467,16 +484,16 @@ export default function OrderStatusWidget({
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-gray-500 font-medium">💳 Placa:</span>
-                <span className="badge bg-dark text-white px-2.5 py-1 font-mono rounded-lg tracking-wider">
+                <span className="badge bg-dark text-white px-2 py-1 font-mono rounded-lg tracking-wider">
                   {driver?.plateNumber || driver?.plate || "MTC-001"}
                 </span>
               </div>
             </div>
 
-            <div className="pt-0.5">
+            <div className="pt-1">
               <button
                 type="button"
-                className={`btn w-100 py-2.5 px-3 rounded-2xl font-bold text-xs d-flex align-items-center justify-content-center gap-2 transition-all duration-300 shadow-md ${
+                className={`w-full py-2 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-md ${
                   unreadCount > 0
                     ? "bg-red-500 text-white animate-bounce ring-4 ring-red-200"
                     : "bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:opacity-95"
@@ -491,7 +508,7 @@ export default function OrderStatusWidget({
                 <span>Abrir Chat App</span>
 
                 {unreadCount > 0 && (
-                  <span className="badge bg-white text-red-600 rounded-full px-2 py-0.5 font-black text-[11px] shadow-sm ml-1">
+                  <span className="bg-white text-red-600 rounded-full px-2 py-0.5 font-black text-[10px] shadow-sm ml-1 truncate">
                     {unreadCount} NUEVO{unreadCount > 1 ? "S" : ""}
                   </span>
                 )}

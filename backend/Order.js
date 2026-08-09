@@ -89,7 +89,7 @@ const orderSchema = new mongoose.Schema(
     rating: { type: Number, min: 1, max: 5, default: null },
     ratingComment: { type: String, default: "", trim: true },
 
-    // 10. Geolocalización y Contraofertas (Nuevos campos para MapView y Motocarros)
+    // 10. Geolocalización y Contraofertas
     originCoords: {
       lat: { type: Number, default: null },
       lng: { type: Number, default: null },
@@ -104,11 +104,18 @@ const orderSchema = new mongoose.Schema(
       heading: { type: Number, default: 0 },
       updatedAt: { type: Date, default: Date.now },
     },
+
+    // 🤝 ESTRUCTURA OPTIMIZADA DE CONTRAOFERTAS
     counterOffers: [
       {
-        driverId: { type: String, required: true },
+        driverId: { type: mongoose.Schema.Types.Mixed, required: true },
         driverName: { type: String, default: "Conductor Motocarro" },
         proposedPrice: { type: Number, required: true },
+        status: {
+          type: String,
+          enum: ["pending", "accepted", "rejected"],
+          default: "pending",
+        },
         createdAt: { type: Date, default: Date.now },
       },
     ],
