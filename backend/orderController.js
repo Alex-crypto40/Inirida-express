@@ -367,12 +367,22 @@ export const getActiveDriverOrder = async (req, res) => {
 
     const activeOrder = await Order.findOne({
       driver: driverId,
-      status: { $in: ["assigned", "at_store", "on_the_way"] },
+      status: {
+        $in: [
+          "assigned",
+          "accepted",
+          "en_camino",
+          "in_progress",
+          "at_store",
+          "on_the_way",
+        ],
+      },
     })
       .populate("store", "name address phone")
       .populate("driver", "name phone vehicleType vehiclePlate");
 
-    res.json({ activeOrder: activeOrder || null });
+    // 🟢 CORRECCIÓN: Responder directamente el objeto de la orden (o null) sin envolverlo en { activeOrder }
+    res.json(activeOrder || null);
   } catch (error) {
     console.error("Error al obtener la carrera activa:", error);
     res.status(500).json({ message: "Error al consultar la carrera activa." });
