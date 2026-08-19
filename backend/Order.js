@@ -5,7 +5,14 @@ const orderSchema = new mongoose.Schema(
     // 1. Tipo de Servicio
     serviceType: {
       type: String,
-      enum: ["delivery", "mandado", "ride"],
+      enum: [
+        "delivery",
+        "mandado",
+        "ride",
+        "carrerita",
+        "pasajero",
+        "motocarro",
+      ],
       default: "delivery",
       required: true,
     },
@@ -22,14 +29,16 @@ const orderSchema = new mongoose.Schema(
       default: null,
     },
 
-    // 3. Datos del Cliente
+    // 3. Datos del Cliente (Soporta ObjectId o subdocumento embebido)
     customer: {
-      name: { type: String, required: true, trim: true },
-      phone: { type: String, required: true, trim: true },
-      address: { type: String, required: true, trim: true },
-      pickupAddress: { type: String, default: "", trim: true },
-      notes: { type: String, default: "", trim: true },
+      type: mongoose.Schema.Types.Mixed,
+      ref: "User",
+      required: true,
     },
+
+    // Direcciones explícitas de Origen y Destino en texto
+    originAddress: { type: String, default: "", trim: true },
+    destinationAddress: { type: String, default: "", trim: true },
 
     // 4. Módulo Especial para Carreras (RideDetails)
     rideDetails: {
@@ -69,9 +78,13 @@ const orderSchema = new mongoose.Schema(
       enum: [
         "created",
         "pending_driver",
+        "pending",
+        "searching",
         "assigned",
+        "accepted",
         "at_store",
         "on_the_way",
+        "in_progress",
         "completed",
         "cancelled",
       ],

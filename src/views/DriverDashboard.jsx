@@ -1,292 +1,391 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import io from "socket.io-client";
 import {
   MapPin,
   Navigation,
-  DollarSign,
+  CheckCircle,
   Phone,
-  AlertCircle,
-  RefreshCw,
-  Power,
-  Clock,
-  Send,
   MessageSquare,
-  CheckCircle2,
-  Loader2,
-  XCircle,
+  X,
+  Send,
+  Power,
+  RefreshCw,
+  Clock,
+  ExternalLink,
+  Volume2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { io } from "socket.io-client";
 
-// ============================================================================
-// CONFIGURACIÓN DE ENTORNO Y CONSTANTES DE RED
-// ============================================================================
+// ==========================================
+// CONFIGURACIÓN DE URLS Y SOCKETS
+// ==========================================
+const RAW_API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_BASE = RAW_API_URL.replace(/\/$/, "");
+const SOCKET_URL = API_BASE.replace(/\/api$/, "");
 
-const IS_PROD =
-  process.env.NODE_ENV === "production" ||
-  window.location.hostname !== "localhost";
-
-const BASE_DOMAIN = IS_PROD
-  ? "https://inirida-express.onrender.com"
-  : "http://localhost:5000";
-
-const API_URL = process.env.REACT_APP_API_URL || `${BASE_DOMAIN}/api`;
-const SOCKET_URL = process.env.REACT_APP_SOCKET_URL || BASE_DOMAIN;
-
-// ============================================================================
-// FUNCIONES AUXILIARES DE GEOLOCALIZACIÓN Y GPS
-// ============================================================================
-
-function distance(lat1, lon1, lat2, lon2) {
-  const R = 6371e3;
-  const φ1 = (lat1 * Math.PI) / 180;
-  const φ2 = (lat2 * Math.PI) / 180;
-  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
+// ==========================================
+// FUNCIONES AUXILIARES GPS Y NAVEGACIÓN
+// ==========================================
+const distance = (lat1, lon1, lat2, lon2) => {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+  const R = 6371000; // metros
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; // Devuelve metros
+};
 
-  return R * c;
-}
-
-function smoothPosition(prevPos, currentPos) {
-  if (!prevPos) return currentPos;
-  const factor = 0.3;
+const smoothPosition = (prevPos, newPos) => {
+  if (!prevPos) return newPos;
+  // Factor de suavizado (0.3 peso nuevo, 0.7 peso anterior)
   return {
-    lat: prevPos.lat + (currentPos.lat - prevPos.lat) * factor,
-    lng: prevPos.lng + (currentPos.lng - prevPos.lng) * factor,
+    lat: prevPos.lat + (newPos.lat - prevPos.lat) * 0.3,
+    lng: prevPos.lng + (newPos.lng - prevPos.lng) * 0.3,
   };
-}
+};
 
-function getDynamicInterval(speed) {
-  if (!speed || speed < 1.5) return 7000;
-  if (speed < 5) return 5000;
-  return 3000;
-}
-
-// ============================================================================
-// COMPONENTE PRINCIPAL (DRIVER DASHBOARD)
-// ============================================================================
+const getDynamicInterval = (speed) => {
+  // Ajusta la frecuencia de envío del GPS según la velocidad (km/h)
+  if (!speed || speed < 2) return 5000; // Detenido: cada 5s
+  if (speed < 15) return 3000; // Desplazamiento lento: cada 3s
+  return 1500; // En movimiento rápido: cada 1.5s
+};
 
 export default function DriverDashboard({ driver, onLogout }) {
-  const savedDriverData = JSON.parse(
-    localStorage.getItem("driverData") || "{}",
-  );
+  // ==========================================
+  // 1. OBTENCIÓN DE DATOS DEL CONDUCTOR
+  // ==========================================
+  const getSavedDriver = () => {
+    try {
+      const item = localStorage.getItem("driverData");
+      return item ? JSON.parse(item) : null;
+    } catch (e) {
+      console.error("Error al leer driverData de localStorage", e);
+      return null;
+    }
+  };
 
+  const savedDriverData = getSavedDriver();
   const driverId =
     driver?.id ||
     driver?._id ||
-    driver?.driverId ||
     savedDriverData?.id ||
     savedDriverData?._id ||
-    savedDriverData?.driverId ||
-    localStorage.getItem("driverId");
-
+    "DRV-123";
   const driverName =
-    driver?.name ||
-    driver?.fullName ||
-    driver?.nombre ||
-    savedDriverData?.name ||
-    savedDriverData?.fullName ||
-    savedDriverData?.nombre ||
-    "Conductor";
+    driver?.name || savedDriverData?.name || "Conductor Motocarro";
 
-  useEffect(() => {
-    if (driver && Object.keys(driver).length > 0) {
-      localStorage.setItem("driverData", JSON.stringify(driver));
-      const idToSave = driver.id || driver._id || driver.driverId;
-      if (idToSave) {
-        localStorage.setItem("driverId", idToSave);
-      }
-    }
-  }, [driver]);
-
-  // ESTADOS
+  // ==========================================
+  // 2. ESTADOS PRINCIPALES
+  // ==========================================
   const [isOnline, setIsOnline] = useState(() => {
-    const savedStatus = localStorage.getItem("driver_is_online");
-    if (savedStatus !== null) {
-      return JSON.parse(savedStatus);
+    try {
+      const savedStatus = localStorage.getItem(`driver_is_online_${driverId}`);
+      return savedStatus ? JSON.parse(savedStatus) : false;
+    } catch (e) {
+      return false;
     }
-    return (
-      driver?.isAvailable ||
-      driver?.isOnline ||
-      savedDriverData?.isAvailable ||
-      false
-    );
   });
 
-  const [activeOrder, setActiveOrder] = useState(null);
   const [availableOrders, setAvailableOrders] = useState([]);
-  const [customRates, setCustomRates] = useState({});
-  const [pendingOffers, setPendingOffers] = useState({}); // Control de ofertas enviadas
-  const [chatMessages, setChatMessages] = useState([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [completionPin, setCompletionPin] = useState("");
-  const [pinError, setPinError] = useState("");
+  const [activeOrder, setActiveOrder] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
   const [geoError, setGeoError] = useState(null);
+  const [isMinimized, setIsMinimized] = useState(false); // 🟢 Estado para colapsar/minimizar la tarjeta flotante
 
+  // Guardar estado en línea
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `driver_is_online_${driverId}`,
+        JSON.stringify(isOnline),
+      );
+    } catch (e) {
+      console.error("Error guardando el estado en línea", e);
+    }
+  }, [isOnline, driverId]);
+
+  // GPS y Chat
+  const [currentCoords, setCurrentCoords] = useState(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [newMessageText, setNewMessageText] = useState("");
+
+  // Referencias declaradas correctamente
   const socketRef = useRef(null);
-  const watchPositionId = useRef(null);
-  const modifiedOffersRef = useRef(new Set());
-  const queueRef = useRef([]);
+  const watchIdRef = useRef(null);
+  const queueRef = useRef([]); // Buffer offline
+  const chatEndRef = useRef(null);
 
-  const checkIsRide = (order) => {
-    if (!order) return false;
-    const type = order.orderType || order.serviceType;
+  useEffect(() => {
+    if (isChatOpen && chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [chatMessages, isChatOpen]);
+
+  // ==========================================
+  // HELPER PARA EXTRAER ORIGEN Y DESTINO ROBUSTO DESDE items[0] O LA RAÍZ
+  // ==========================================
+  const getOrigin = (ord) => {
+    if (!ord) return "Origen no especificado";
+    const item = ord?.items?.[0] || {};
+    const r = ord.rideDetails || ord;
     return (
-      type === "carrerita" ||
-      type === "pasajero" ||
-      type === "motocarro" ||
-      type === "ride"
+      item.origen ||
+      item.origin ||
+      item.pickupAddress ||
+      item.originAddress ||
+      r.origen ||
+      r.pickupAddress ||
+      r.originAddress ||
+      r.originText ||
+      r.pickup ||
+      (typeof r.origin === "string" ? r.origin : r.origin?.address) ||
+      "Origen no especificado"
     );
   };
 
-  // CHAT & ROOM SUBSCRIPTION
-  useEffect(() => {
-    if (activeOrder && socketRef.current) {
-      const orderId = activeOrder._id || activeOrder.id;
+  const getDestination = (ord) => {
+    if (!ord) return "Destino no especificado";
+    const item = ord?.items?.[0] || {};
+    const r = ord.rideDetails || ord;
+    return (
+      item.detalle ||
+      item.destino ||
+      item.destination ||
+      item.dropoffAddress ||
+      item.description ||
+      r.detalle ||
+      r.destino ||
+      r.destinationAddress ||
+      r.dropoffAddress ||
+      r.destinationText ||
+      r.detail ||
+      r.dropoff ||
+      (typeof r.destination === "string"
+        ? r.destination
+        : r.destination?.address) ||
+      "Destino no especificado"
+    );
+  };
 
-      socketRef.current.emit("join_order_room", orderId);
-      socketRef.current.emit("join_room", `order_${orderId}`);
-
-      fetch(`${API_URL}/orders/${orderId}/messages`)
-        .then((res) => (res.ok ? res.json() : []))
-        .then((data) => {
-          if (Array.isArray(data)) setChatMessages(data);
-        })
-        .catch((err) => console.error("Error al cargar chat:", err));
-    }
-  }, [activeOrder]);
-
-  // SOCKETS & VISIBILIDAD
-  useEffect(() => {
-    socketRef.current = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 2000,
-      closeOnBeforeunload: false,
-    });
-
-    socketRef.current.on("connect", () => {
-      console.log("Conectado exitosamente al servidor");
-      if (driverId) {
-        socketRef.current.emit("register_driver", driverId);
-      }
-      if (queueRef.current.length > 0) {
-        queueRef.current.forEach((locationData) => {
-          socketRef.current.emit("update_driver_location", locationData);
-        });
-        queueRef.current = [];
-      }
-    });
-
-    socketRef.current.on("order_created", (newOrder) => {
-      if (isOnline && !activeOrder) {
-        setAvailableOrders((prev) => [
-          newOrder,
-          ...prev.filter(
-            (o) => (o._id || o.id) !== (newOrder._id || newOrder.id),
-          ),
-        ]);
-      }
-    });
-
-    socketRef.current.on("order_taken", (takenOrderId) => {
-      setAvailableOrders((prev) =>
-        prev.filter((o) => (o._id || o.id) !== takenOrderId),
+  // ==========================================
+  // 3. REPRODUCIR SONIDO DE ALERTA
+  // ==========================================
+  const playAlertSound = () => {
+    try {
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(
+        880,
+        audioCtx.currentTime + 0.3,
       );
-      setPendingOffers((prev) => {
-        const copy = { ...prev };
-        delete copy[takenOrderId];
-        return copy;
-      });
-    });
+      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.3);
+    } catch (e) {
+      console.log("No se pudo reproducir el sonido automático:", e);
+    }
+  };
 
-    socketRef.current.on("order_updated", (updatedOrder) => {
-      const updatedId = updatedOrder._id || updatedOrder.id;
-      const currentDriverId = driverId;
+  // ==========================================
+  // 4. CÁLCULO DE DISTANCIA HAVERSINE (En km)
+  // ==========================================
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return null;
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return (R * c).toFixed(1);
+  };
 
-      if (
-        updatedOrder.driverId === currentDriverId ||
-        updatedOrder.driver?._id === currentDriverId
-      ) {
-        if (
-          ["accepted", "en_camino", "in_progress", "assigned"].includes(
-            updatedOrder.status,
-          )
-        ) {
-          setActiveOrder(updatedOrder);
-          setAvailableOrders((prev) =>
-            prev.filter((o) => (o._id || o.id) !== updatedId),
-          );
-        } else if (["completed", "cancelled"].includes(updatedOrder.status)) {
+  // ==========================================
+  // 5. CONSULTA DE CARRERAS DISPONIBLES
+  // ==========================================
+  const fetchOrders = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/orders/available`);
+      if (res.ok) {
+        const data = await res.json();
+        const ordersList = Array.isArray(data) ? data : data.orders || [];
+
+        setAvailableOrders((prevOrders) => {
+          if (ordersList.length > prevOrders.length && prevOrders.length > 0) {
+            playAlertSound();
+          }
+          return ordersList;
+        });
+      }
+    } catch (err) {
+      console.error("Error obteniendo carreras disponibles:", err);
+    }
+  }, []);
+
+  // ==========================================
+  // 6. CONSULTA DE CARRERA ACTIVA
+  // ==========================================
+  const checkActiveOrder = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/orders/driver-active/${driverId}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && (data._id || data.id)) {
+          setActiveOrder(data);
+        } else {
           setActiveOrder(null);
         }
       }
-    });
+    } catch (err) {
+      console.error("Error consultando carrera activa:", err);
+    }
+  }, [driverId]);
 
-    // EVENTOS DE CONTRAOFERTA EN TIEMPO REAL
-    socketRef.current.on("counter_offer_accepted", ({ orderId, order }) => {
-      setPendingOffers((prev) => {
-        const copy = { ...prev };
-        delete copy[orderId];
-        return copy;
+  // ==========================================
+  // 7. SOCKET.IO: CONEXIÓN EN TIEMPO REAL
+  // ==========================================
+  useEffect(() => {
+    if (!isOnline) {
+      if (socketRef.current) socketRef.current.disconnect();
+      return;
+    }
+
+    try {
+      const socket = io(SOCKET_URL, {
+        transports: ["websocket", "polling"],
+        query: { driverId },
       });
-      if (order) {
-        setActiveOrder(order);
-      } else {
+      socketRef.current = socket;
+
+      socket.on("connect", () => {
+        console.log(
+          "🟢 Conectado exitosamente por Socket.io como Conductor:",
+          driverId,
+        );
+        fetchOrders();
         checkActiveOrder();
-      }
-    });
-
-    socketRef.current.on("counter_offer_rejected", ({ orderId, message }) => {
-      setPendingOffers((prev) => {
-        const copy = { ...prev };
-        delete copy[orderId];
-        return copy;
       });
-      alert(message || "El cliente rechazó tu oferta de tarifa.");
-    });
 
-    socketRef.current.on("new_chat_message", (msg) => {
-      setChatMessages((prev) => [...prev, msg]);
-    });
+      socket.on("order:created", () => {
+        playAlertSound();
+        fetchOrders();
+      });
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        if (socketRef.current && !socketRef.current.connected) {
-          socketRef.current.connect();
+      socket.on("order:taken", () => {
+        fetchOrders();
+      });
+
+      socket.on("order_status_updated", (updatedOrder) => {
+        fetchOrders();
+        const activeId = activeOrder?._id || activeOrder?.id;
+        const updatedId = updatedOrder?._id || updatedOrder?.id;
+
+        if (activeId && activeId === updatedId) {
+          const statusLower = (updatedOrder.status || "").toLowerCase();
+          if (statusLower === "completed" || statusLower === "cancelled") {
+            setActiveOrder(null);
+            setIsChatOpen(false);
+          } else {
+            setActiveOrder(updatedOrder);
+          }
         }
-      }
-    };
+      });
 
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+      socket.on("chat:message", (msg) => {
+        const activeId = activeOrder?._id || activeOrder?.id;
+        if (msg.orderId === activeId) {
+          setChatMessages((prev) => [...prev, msg]);
+        }
+      });
+
+      socket.on("disconnect", () => {
+        console.log("🔴 Socket.io Desconectado");
+      });
+    } catch (err) {
+      console.warn("Error inicializando Socket.io:", err);
+    }
 
     return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (socketRef.current) socketRef.current.disconnect();
     };
-  }, [driverId, isOnline, activeOrder]);
+  }, [
+    isOnline,
+    driverId,
+    fetchOrders,
+    checkActiveOrder,
+    activeOrder?._id,
+    activeOrder?.id,
+  ]);
 
-  // GEOLOCALIZACIÓN
+  // ==========================================
+  // 7.5 HTTP POLLING DE RESPALDO DE SEGURIDAD
+  // ==========================================
+  useEffect(() => {
+    if (!isOnline) return;
+
+    if (activeOrder) {
+      checkActiveOrder();
+    } else {
+      fetchOrders();
+    }
+
+    const interval = setInterval(() => {
+      if (activeOrder) {
+        checkActiveOrder();
+      } else {
+        fetchOrders();
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [isOnline, activeOrder, fetchOrders, checkActiveOrder]);
+
+  // ==========================================
+  // 8. RASTREO GPS EN TIEMPO REAL
+  // ==========================================
   useEffect(() => {
     if (!isOnline || !("geolocation" in navigator)) return;
 
     let lastSendTime = 0;
     let lastValidPosition = null;
 
-    watchPositionId.current = navigator.geolocation.watchPosition(
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude, accuracy, heading, speed } =
           position.coords;
         const now = Date.now();
 
-        if (accuracy > 120) return;
+        setCurrentCoords({ lat: latitude, lng: longitude });
+        setGpsAccuracy(accuracy);
 
+        // 🔴 1. FILTRO DE PRECISIÓN
+        if (accuracy > 120) {
+          console.warn(`[GPS] Baja precisión detectada (${accuracy}m)`);
+          return;
+        }
+
+        // 🔴 2. FILTRO ANTI-SALTO
         if (lastValidPosition) {
           const dist = distance(
             lastValidPosition.lat,
@@ -294,15 +393,22 @@ export default function DriverDashboard({ driver, onLogout }) {
             latitude,
             longitude,
           );
-          if (dist > 200) return;
+
+          if (dist > 200) {
+            console.warn("[GPS] Salto inusual de ubicación (>200m), ignorado");
+            return;
+          }
         }
 
+        // 🟢 3. SUAVIZADO
         const smoothed = smoothPosition(lastValidPosition, {
           lat: latitude,
           lng: longitude,
         });
 
         lastValidPosition = smoothed;
+
+        // 🟢 4. FRECUENCIA DINÁMICA
         const interval = getDynamicInterval(speed);
 
         if (now - lastSendTime < interval) return;
@@ -310,26 +416,35 @@ export default function DriverDashboard({ driver, onLogout }) {
 
         const locationData = {
           driverId,
-          driverName,
-          phone: driver?.phone || savedDriverData?.phone || "",
+          driverName: driver?.name || driverName,
+          phone: driver?.phone || "",
+          vehiclePlate: driver?.vehiclePlate || "",
           lat: smoothed.lat,
           lng: smoothed.lng,
           heading: heading || 0,
           speed: speed || 0,
           accuracy,
           timestamp: now,
-          isAvailable: true,
+          isAvailable: isOnline && !activeOrder,
         };
 
+        // 🟢 5. ENVÍO VÍA SOCKET O BUFFER
         if (socketRef.current?.connected) {
+          if (queueRef.current && queueRef.current.length > 0) {
+            queueRef.current = [];
+          }
           socketRef.current.emit("update_driver_location", locationData);
-        } else {
+        } else if (queueRef.current) {
+          if (queueRef.current.length >= 5) {
+            queueRef.current.shift();
+          }
           queueRef.current.push(locationData);
         }
 
         setGeoError(null);
       },
       (err) => {
+        console.warn("GPS error:", err.message);
         setGeoError("Señal GPS débil...");
       },
       {
@@ -340,251 +455,71 @@ export default function DriverDashboard({ driver, onLogout }) {
     );
 
     return () => {
-      if (watchPositionId.current) {
-        navigator.geolocation.clearWatch(watchPositionId.current);
+      if (watchIdRef.current) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [isOnline, driverId, driver, driverName, savedDriverData]);
+  }, [isOnline, driverId, driver, activeOrder, driverName]);
 
-  // PETICIONES API
-  const fetchOrders = useCallback(async () => {
-    if (!isOnline) return;
-    try {
-      const res = await fetch(`${API_URL}/orders/available`);
-      if (!res.ok) throw new Error("Error en la solicitud de pedidos");
-      const orders = await res.json();
-
-      if (!activeOrder) {
-        setAvailableOrders(orders || []);
-      }
-
-      setCustomRates((prev) => {
-        const updated = { ...prev };
-        (orders || []).forEach((order) => {
-          const id = order._id || order.id;
-          if (!modifiedOffersRef.current.has(id)) {
-            updated[id] =
-              order.offeredRate ||
-              order.subtotal ||
-              order.total ||
-              order.deliveryFee ||
-              0;
-          }
-        });
-        return updated;
-      });
-    } catch (err) {
-      console.error("Error obteniendo pedidos disponibles:", err);
-    }
-  }, [isOnline, activeOrder]);
-
-  const checkActiveOrder = useCallback(async () => {
-    if (!driverId) return;
-    try {
-      const res = await fetch(`${API_URL}/orders/active/driver/${driverId}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (data._id || data.id)) {
-          setActiveOrder(data);
-          setAvailableOrders([]);
-        } else {
-          setActiveOrder(null);
-        }
-      } else {
-        setActiveOrder(null);
-      }
-    } catch (err) {
-      console.error("Error al verificar orden activa:", err);
-      setActiveOrder(null);
-    }
-  }, [driverId]);
-
-  useEffect(() => {
-    checkActiveOrder();
-  }, [checkActiveOrder]);
-
-  useEffect(() => {
-    let interval;
-    if (isOnline) {
-      if (activeOrder) {
-        checkActiveOrder();
-      } else {
-        fetchOrders();
-      }
-      interval = setInterval(() => {
-        checkActiveOrder();
-        if (!activeOrder) fetchOrders();
-      }, 5000);
-    }
-    return () => clearInterval(interval);
-  }, [isOnline, activeOrder, fetchOrders, checkActiveOrder]);
-
-  // ACCIONES
-  const toggleOnlineStatus = async () => {
-    if (!driverId) {
-      alert("Error de identificación del conductor.");
-      return;
-    }
-
+  // ==========================================
+  // 9. ACCIONES DEL CONDUCTOR
+  // ==========================================
+  const handleAcceptOrder = async (order) => {
     setLoading(true);
-    const newStatus = !isOnline;
+    setError("");
+
+    const orderId = order._id || order.id;
 
     try {
-      const res = await fetch(`${API_URL}/drivers/${driverId}/status`, {
+      const res = await fetch(`${API_BASE}/orders/take/${orderId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ driverId }),
+      });
+
+      const responseData = await res.json();
+
+      if (res.ok) {
+        setActiveOrder(responseData.order || responseData);
+        fetchOrders();
+      } else {
+        setError(responseData.message || "No se pudo tomar la carrera.");
+      }
+    } catch (err) {
+      setError("Error de red al aceptar la carrera.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateStatus = async (nextStatus) => {
+    const activeId = activeOrder?._id || activeOrder?.id;
+    if (!activeId) return;
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${API_BASE}/orders/${activeId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          isAvailable: newStatus,
-          isOnline: newStatus,
-        }),
+        body: JSON.stringify({ status: nextStatus, driverId }),
       });
 
-      if (!res.ok) {
-        await fetch(`${API_URL}/drivers/${driverId}/status`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            isAvailable: newStatus,
-            isOnline: newStatus,
-          }),
-        });
-      }
-
-      setIsOnline(newStatus);
-      localStorage.setItem("driver_is_online", JSON.stringify(newStatus));
-
-      if (socketRef.current?.connected) {
-        if (!newStatus) {
-          socketRef.current.emit("update_driver_location", {
-            driverId,
-            isAvailable: false,
-          });
-          setAvailableOrders([]);
+      if (res.ok) {
+        const nextStatusLower = nextStatus.toLowerCase();
+        if (
+          nextStatusLower === "completed" ||
+          nextStatusLower === "cancelled"
+        ) {
+          setActiveOrder(null);
+          setChatMessages([]);
+          setIsChatOpen(false);
+          fetchOrders();
+        } else {
+          setActiveOrder((prev) => ({ ...prev, status: nextStatus }));
         }
       }
     } catch (err) {
-      alert("No se pudo cambiar el estado de conexión.");
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // ENVIAR CONTRAOFERTA / ACEPTAR TARIFAS
-  const handleOfferOrAccept = async (order, proposedPrice) => {
-    const orderId = order._id || order.id;
-    const basePrice =
-      order.offeredRate ||
-      order.subtotal ||
-      order.total ||
-      order.deliveryFee ||
-      0;
-    const finalPrice = Number(proposedPrice);
-
-    setLoading(true);
-
-    // Si la tarifa no cambió, acepta la orden de inmediato
-    if (finalPrice === basePrice) {
-      try {
-        const res = await fetch(`${API_URL}/orders/${orderId}/accept`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            driverId,
-            price: finalPrice,
-          }),
-        });
-
-        if (!res.ok) throw new Error("No se pudo aceptar la carrera.");
-        checkActiveOrder();
-      } catch (error) {
-        console.error("Error al aceptar la orden:", error);
-        alert(error.message || "No se pudo aceptar la carrera.");
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
-
-    // Si cambió el precio, se envía la contraoferta al cliente
-    try {
-      const offerPayload = {
-        orderId,
-        driverId,
-        driverName,
-        offeredRate: finalPrice,
-        originalRate: basePrice,
-      };
-
-      if (socketRef.current?.connected) {
-        socketRef.current.emit("send_counter_offer", offerPayload);
-      }
-
-      const res = await fetch(`${API_URL}/orders/${orderId}/counter-offer`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(offerPayload),
-      });
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.message || "Error al enviar la propuesta.");
-      }
-
-      setPendingOffers((prev) => ({ ...prev, [orderId]: finalPrice }));
-    } catch (err) {
-      console.error("Error enviando propuesta:", err);
-      alert(err.message || "No se pudo enviar la contraoferta.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCancelOffer = (orderId) => {
-    setPendingOffers((prev) => {
-      const copy = { ...prev };
-      delete copy[orderId];
-      return copy;
-    });
-
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("cancel_counter_offer", { orderId, driverId });
-    }
-  };
-
-  const handleCompleteOrder = async () => {
-    if (!activeOrder) return;
-    const isRide = checkIsRide(activeOrder);
-
-    if (!isRide && completionPin.length !== 4) {
-      setPinError("Ingresa el PIN de 4 dígitos enviado al cliente.");
-      return;
-    }
-
-    setLoading(true);
-    setPinError("");
-    try {
-      const orderId = activeOrder._id || activeOrder.id;
-      const res = await fetch(`${API_URL}/orders/${orderId}/complete`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          driverId,
-          status: "completed",
-          pin: isRide ? null : completionPin,
-        }),
-      });
-
-      const data = await res.json();
-      if (!res.ok)
-        throw new Error(data.message || "Error al completar pedido.");
-
-      setActiveOrder(null);
-      setCompletionPin("");
-      fetchOrders();
-    } catch (err) {
-      setPinError(err.message);
-      alert(err.message);
+      console.error("Error al cambiar estado:", err);
     } finally {
       setLoading(false);
     }
@@ -592,434 +527,527 @@ export default function DriverDashboard({ driver, onLogout }) {
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !activeOrder) return;
+    const activeId = activeOrder?._id || activeOrder?.id;
+    if (!newMessageText.trim() || !activeId) return;
 
-    const orderId = activeOrder._id || activeOrder.id;
-    const payload = {
-      orderId,
-      senderId: driverId,
+    const messageObj = {
       senderType: "driver",
-      text: newMessage.trim(),
-      timestamp: new Date(),
+      senderId: driverId,
+      text: newMessageText.trim(),
+      timestamp: new Date().toISOString(),
     };
 
-    socketRef.current?.emit("send_chat_message", payload);
-    setChatMessages((prev) => [...prev, payload]);
-    setNewMessage("");
+    if (socketRef.current) {
+      socketRef.current.emit("chat_message", {
+        orderId: activeId,
+        message: messageObj,
+      });
+    }
+
+    setChatMessages((prev) => [...prev, messageObj]);
+    setNewMessageText("");
   };
 
-  const handleRateChange = (orderId, val) => {
-    const num = parseFloat(val) || 0;
-    modifiedOffersRef.current.add(orderId);
-    setCustomRates((prev) => ({ ...prev, [orderId]: num }));
+  const openExternalNavigation = (lat, lng, address) => {
+    if (lat && lng) {
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+        "_blank",
+      );
+    } else if (address) {
+      window.open(
+        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,
+        "_blank",
+      );
+    }
   };
-
+  // ==========================================
+  // INTERFAZ DE USUARIO (JSX)
+  // ==========================================
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
-      <header className="flex items-center justify-between px-3 py-2.5 bg-[#0f172a] text-white w-full border-b border-gray-800">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="bg-amber-500/20 p-1.5 rounded-lg shrink-0">
-            <svg
-              className="w-5 h-5 text-amber-500"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-              />
-            </svg>
-          </div>
-          <div className="truncate">
-            <h1 className="font-bold text-sm sm:text-base leading-tight truncate">
-              Inírida Express
-            </h1>
-            <p className="text-[10px] sm:text-xs text-amber-400/90 font-medium leading-none truncate mt-0.5">
-              {driverName}
+    <div
+      className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative transition-all duration-300 ${
+        activeOrder ? "pb-72" : "pb-6"
+      }`}
+    >
+      {/* 1. CABECERA SUPERIOR */}
+      <header className="bg-slate-900/90 border-b border-slate-800 p-4 sticky top-0 z-20 backdrop-blur flex justify-between items-center shadow-lg">
+        <div className="flex items-center space-x-3">
+          <div
+            className={`w-3 h-3 rounded-full ${
+              isOnline ? "bg-emerald-500 animate-pulse" : "bg-red-500"
+            }`}
+          />
+          <div>
+            <h1 className="font-bold text-sm text-slate-100">{driverName}</h1>
+            <p className="text-xs text-slate-400">
+              {isOnline
+                ? gpsAccuracy
+                  ? `GPS Activo (±${Math.round(gpsAccuracy)}m)`
+                  : "Conectado - Buscando GPS"
+                : "Desconectado"}
             </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+        <div className="flex items-center space-x-2">
+          {/* BOTÓN CONECTAR / DESCONECTAR */}
           <button
-            onClick={toggleOnlineStatus}
-            disabled={loading}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium transition-colors ${
+            onClick={() => setIsOnline(!isOnline)}
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
               isOnline
                 ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                : "bg-gray-800 text-gray-400 border border-gray-700"
+                : "bg-red-500/10 text-red-400 border border-red-500/30"
             }`}
           >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                isOnline ? "bg-emerald-400 animate-pulse" : "bg-gray-500"
-              }`}
-            />
-            <span className="whitespace-nowrap">
-              {isOnline ? "En Línea" : "Off-line"}
-            </span>
+            <Power className="w-3.5 h-3.5" />
+            <span>{isOnline ? "DISPONIBLE" : "OFFLINE"}</span>
           </button>
 
+          {/* BOTÓN CERRAR SESIÓN */}
           <button
             onClick={onLogout}
-            className="p-1.5 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-200 transition-colors"
             title="Cerrar sesión"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            <X className="w-5 h-5" />
           </button>
         </div>
       </header>
 
-      {geoError && (
-        <div className="bg-amber-500/10 border-b border-amber-500/20 p-3 text-amber-300 text-xs flex items-center space-x-2 justify-center">
-          <AlertCircle className="w-4 h-4 flex-shrink-0" />
-          <span>{geoError}</span>
+      {/* MENSAJES DE ERROR */}
+      {error && (
+        <div className="bg-red-500/10 border-b border-red-500/30 text-red-400 p-3 text-xs text-center flex justify-between items-center">
+          <span>{error}</span>
+          <button onClick={() => setError("")} className="font-bold">
+            ✕
+          </button>
         </div>
       )}
 
-      <main className="flex-1 p-4 max-w-3xl w-full mx-auto space-y-4">
-        {activeOrder && (activeOrder._id || activeOrder.id) ? (
-          <div className="bg-slate-800 border border-slate-700 rounded-2xl p-5 space-y-5 shadow-xl">
-            <div className="flex justify-between items-start border-b border-slate-700 pb-3">
-              <div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-400/10 text-amber-400 border border-amber-400/20">
-                  {checkIsRide(activeOrder)
-                    ? "Carrera en Curso"
-                    : "Domicilio en Curso"}
-                </span>
-                <h2 className="text-xl font-bold mt-2">
-                  {checkIsRide(activeOrder)
-                    ? "Servicio de Pasajero"
-                    : `Pedido #${String(activeOrder._id || activeOrder.id || "").slice(-4)}`}
-                </h2>
-              </div>
-              <a
-                href={`tel:${
-                  activeOrder.customer?.phone || activeOrder.clientPhone || ""
-                }`}
-                className="p-3 bg-emerald-500/20 text-emerald-400 rounded-full hover:bg-emerald-500/30"
-              >
-                <Phone className="w-5 h-5" />
-              </a>
-            </div>
-
-            <div className="space-y-3 bg-slate-900/50 p-4 rounded-xl border border-slate-700/50">
-              <div className="flex items-start space-x-3">
-                <MapPin className="w-5 h-5 text-emerald-400 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-slate-400">Origen / Recogida</p>
-                  <p className="font-medium text-slate-200">
-                    {activeOrder.origen ||
-                      activeOrder.pickupAddress ||
-                      activeOrder.origin ||
-                      activeOrder.store?.name ||
-                      activeOrder.customer?.address ||
-                      "Origen no especificado"}
-                  </p>
-                </div>
-              </div>
-              <div className="border-l-2 border-dashed border-slate-700 ml-2.5 h-4" />
-              <div className="flex items-start space-x-3">
-                <Navigation className="w-5 h-5 text-amber-400 mt-1 flex-shrink-0" />
-                <div>
-                  <p className="text-xs text-slate-400">Destino / Entrega</p>
-                  <p className="font-medium text-slate-200">
-                    {activeOrder.destino ||
-                      activeOrder.deliveryAddress ||
-                      activeOrder.destination ||
-                      activeOrder.customer?.notes ||
-                      activeOrder.notes ||
-                      "Destino no especificado"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
-                <p className="text-xs text-slate-400">Cliente</p>
-                <p className="font-semibold">
-                  {activeOrder.customer?.name ||
-                    activeOrder.clientName ||
-                    "Usuario"}
-                </p>
-              </div>
-              <div className="bg-slate-900/30 p-3 rounded-lg border border-slate-700/30">
-                <p className="text-xs text-slate-400">Valor Acordado</p>
-                <p className="font-bold text-emerald-400 text-base">
-                  $
-                  {(
-                    activeOrder.total ||
-                    activeOrder.subtotal ||
-                    activeOrder.agreedRate ||
-                    activeOrder.totalAmount ||
-                    0
-                  ).toLocaleString()}{" "}
-                  COP
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-3 pt-2">
-              <button
-                onClick={() => setIsChatOpen(!isChatOpen)}
-                className="w-full py-2.5 bg-slate-700/50 hover:bg-slate-700 text-slate-200 rounded-xl font-medium flex items-center justify-center space-x-2 text-sm"
-              >
-                <MessageSquare className="w-4 h-4" />
-                <span>
-                  {isChatOpen ? "Ocultar Chat" : "Abrir Chat con Cliente"}
-                </span>
-              </button>
-
-              {isChatOpen && (
-                <div className="bg-slate-900 border border-slate-700 rounded-xl p-3 h-48 flex flex-col justify-between">
-                  <div className="overflow-y-auto space-y-2 mb-2 pr-1 text-xs">
-                    {chatMessages.length === 0 ? (
-                      <p className="text-slate-500 text-center py-4">
-                        No hay mensajes previos
-                      </p>
-                    ) : (
-                      chatMessages.map((m, idx) => (
-                        <div
-                          key={idx}
-                          className={`p-2 rounded-lg max-w-[80%] ${
-                            m.senderType === "driver"
-                              ? "bg-amber-500/20 text-amber-200 ml-auto"
-                              : "bg-slate-800 text-slate-200"
-                          }`}
-                        >
-                          {m.text}
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <form onSubmit={handleSendMessage} className="flex space-x-2">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Escribe un mensaje..."
-                      className="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none"
-                    />
-                    <button
-                      type="submit"
-                      className="p-2 bg-amber-500 text-slate-950 rounded-lg hover:bg-amber-400"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                    </button>
-                  </form>
-                </div>
-              )}
-
-              {!checkIsRide(activeOrder) && (
-                <div className="space-y-1.5">
-                  <label className="text-xs text-slate-400 block">
-                    PIN de Entrega (Requerido para Comercios)
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={4}
-                    value={completionPin}
-                    onChange={(e) =>
-                      setCompletionPin(e.target.value.replace(/\D/g, ""))
-                    }
-                    placeholder="0000"
-                    className="w-full text-center tracking-widest text-lg font-mono bg-slate-900 border border-slate-700 rounded-xl py-2 focus:border-amber-400 focus:outline-none"
-                  />
-                  {pinError && (
-                    <p className="text-xs text-rose-400 text-center">
-                      {pinError}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <button
-                onClick={handleCompleteOrder}
-                disabled={loading}
-                className="w-full py-3.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl transition-colors shadow-lg shadow-emerald-500/10 flex items-center justify-center space-x-2"
-              >
-                <CheckCircle2 className="w-5 h-5" />
-                <span>
-                  {checkIsRide(activeOrder)
-                    ? "Finalizar Carrera"
-                    : "Confirmar Entrega con PIN"}
-                </span>
-              </button>
-            </div>
+      {/* 2. PANEL PRINCIPAL / LISTA DE CARRERAS DISPONIBLES */}
+      <main className="p-4 flex-1 max-w-xl mx-auto w-full">
+        {!isOnline ? (
+          <div className="text-center py-16 px-4">
+            <Power className="w-16 h-16 text-slate-700 mx-auto mb-4 animate-bounce" />
+            <h2 className="text-lg font-bold text-slate-300 mb-1">
+              Estás fuera de línea
+            </h2>
+            <p className="text-xs text-slate-500 max-w-xs mx-auto">
+              Activa tu disponibilidad en el botón superior para empezar a
+              recibir solicitudes cercanas.
+            </p>
           </div>
         ) : (
-          <div className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h2 className="font-bold text-slate-200">
-                Carreras y Pedidos Cerca
+          <div>
+            <div className="flex justify-between items-center mb-3">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-1">
+                <span>Carreras Disponibles</span>
+                <span className="bg-amber-500/20 text-amber-400 text-[10px] px-2 py-0.5 rounded-full ml-2">
+                  {availableOrders.length}
+                </span>
               </h2>
+
               <button
                 onClick={fetchOrders}
-                disabled={!isOnline || loading}
-                className="p-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-slate-400 disabled:opacity-50"
+                className="text-slate-400 hover:text-amber-400 transition-colors"
+                title="Actualizar carreras"
               >
-                <RefreshCw
-                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
-                />
+                <RefreshCw className="w-4 h-4" />
               </button>
             </div>
 
-            {!isOnline ? (
-              <div className="bg-slate-800/50 border border-slate-700/50 rounded-2xl p-8 text-center space-y-3">
-                <Power className="w-10 h-10 text-slate-500 mx-auto" />
-                <p className="text-slate-400 font-medium text-sm">
-                  Ponte en línea para recibir servicios en Inírida
-                </p>
-              </div>
-            ) : availableOrders.length === 0 ? (
-              <div className="bg-slate-800/30 border border-slate-800 rounded-2xl p-8 text-center space-y-2">
-                <Clock className="w-8 h-8 text-slate-600 mx-auto" />
-                <p className="text-slate-400 text-sm">
-                  No hay servicios disponibles en este momento
+            {/* LISTA DE CARRERAS */}
+            {availableOrders.length === 0 ? (
+              <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-8 text-center my-4">
+                <Clock className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+                <p className="text-xs text-slate-400">
+                  Buscando solicitudes cercanas...
                 </p>
               </div>
             ) : (
-              availableOrders.map((order) => {
-                const id = order._id || order.id || Math.random().toString();
-                const isRide = checkIsRide(order);
-                const hasPendingOffer = pendingOffers[id] !== undefined;
-                const basePrice =
-                  order.offeredRate ||
-                  order.subtotal ||
-                  order.total ||
-                  order.deliveryFee ||
-                  0;
-                const currentRate = customRates[id] ?? basePrice;
-                const isCustomRate = currentRate !== basePrice;
+              <div className="space-y-3">
+                {availableOrders.map((ord) => {
+                  const rideDetails = ord?.rideDetails || ord;
 
-                return (
-                  <div
-                    key={id}
-                    className="bg-slate-800/90 border border-slate-700/70 rounded-xl p-3 space-y-2 hover:border-amber-500/40 transition-all shadow-md"
-                  >
-                    <div className="flex justify-between items-center gap-2">
-                      <span
-                        className={`text-[11px] px-2 py-0.5 rounded-md font-semibold tracking-wide border ${
-                          isRide
-                            ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                            : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                        }`}
-                      >
-                        {isRide ? "Carrera Pasajero" : "Domicilio / Comercio"}
-                      </span>
-                      <div className="text-right leading-none">
-                        <span className="text-[10px] text-slate-400 block">
-                          Sugerido
-                        </span>
-                        <span className="text-xs font-bold font-mono text-slate-200">
-                          ${basePrice.toLocaleString()} COP
-                        </span>
-                      </div>
-                    </div>
+                  // EXTRAER ORIGEN ROBUSTO
+                  const item = ord?.items?.[0] || {};
 
-                    <div className="bg-slate-900/60 p-2 rounded-lg border border-slate-800/80 space-y-1.5 text-xs">
-                      <div className="flex items-center space-x-2 min-w-0">
-                        <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        <p className="text-slate-300 truncate">
-                          <span className="text-slate-500 font-medium">
-                            De:
-                          </span>{" "}
-                          {order.origen ||
-                            order.pickupAddress ||
-                            order.origin ||
-                            order.store?.name ||
-                            order.customer?.address ||
-                            "Origen no especificado"}
-                        </p>
-                      </div>
-                      <div className="flex items-center space-x-2 min-w-0">
-                        <Navigation className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                        <p className="text-slate-300 truncate">
-                          <span className="text-slate-500 font-medium">A:</span>{" "}
-                          {order.destino ||
-                            order.deliveryAddress ||
-                            order.destination ||
-                            order.customer?.notes ||
-                            order.notes ||
-                            "Destino no especificado"}
-                        </p>
-                      </div>
-                    </div>
+                  const originText =
+                    item.origen ||
+                    item.origin ||
+                    item.pickupAddress ||
+                    item.originAddress ||
+                    ord?.origen ||
+                    ord?.originAddress ||
+                    ord?.pickupAddress ||
+                    "Origen no especificado";
 
-                    {/* VISTA SEGÚN EL ESTADO DE CONTRAOFERTA */}
-                    {hasPendingOffer ? (
-                      <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-2.5 flex items-center justify-between gap-2">
-                        <div className="flex items-center space-x-2 min-w-0">
-                          <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
-                          <div className="truncate">
-                            <p className="text-xs font-semibold text-amber-300 truncate">
-                              Esperando al cliente...
+                  // EXTRAER DESTINO ROBUSTO
+                  const destinationText =
+                    item.detalle ||
+                    item.destino ||
+                    item.destination ||
+                    item.dropoffAddress ||
+                    item.description ||
+                    ord?.detalle ||
+                    ord?.destino ||
+                    ord?.destinationAddress ||
+                    "Destino no especificado";
+
+                  const originLat =
+                    ord?.originCoords?.lat ||
+                    rideDetails?.originLat ||
+                    rideDetails?.pickupLat ||
+                    ord?.originLat;
+                  const originLng =
+                    ord?.originCoords?.lng ||
+                    rideDetails?.originLng ||
+                    rideDetails?.pickupLng ||
+                    ord?.originLng;
+
+                  const distance =
+                    currentCoords && originLat && originLng
+                      ? calculateDistance(
+                          currentCoords.lat,
+                          currentCoords.lng,
+                          originLat,
+                          originLng,
+                        )
+                      : null;
+
+                  return (
+                    <div
+                      key={ord._id || ord.id}
+                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md hover:border-amber-500/40 transition-all"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                            #
+                            {(ord?._id || ord?.id || "0000")
+                              .toString()
+                              .slice(-4)}
+                          </span>
+                          {distance && (
+                            <span className="ml-2 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-bold">
+                              A {distance} km de ti
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                            Tarifa Estándar
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* DETALLES DE RUTA */}
+                      <div className="space-y-2 text-xs mb-4">
+                        <div className="flex items-start space-x-2">
+                          <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-[10px] text-slate-500 uppercase font-semibold">
+                              Origen
                             </p>
-                            <p className="text-[10px] text-amber-400/80 font-mono">
-                              Oferta: ${pendingOffers[id].toLocaleString()} COP
+                            <p className="text-slate-200 line-clamp-1">
+                              {originText}
                             </p>
                           </div>
                         </div>
-                        <button
-                          onClick={() => handleCancelOffer(id)}
-                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors shrink-0"
-                          title="Cancelar propuesta"
-                        >
-                          <XCircle className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="pt-1 flex items-center gap-2">
-                        <div className="relative flex-1">
-                          <DollarSign className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                          <input
-                            type="number"
-                            value={customRates[id] ?? ""}
-                            onChange={(e) =>
-                              handleRateChange(id, e.target.value)
-                            }
-                            placeholder="Tu tarifa"
-                            className="w-full bg-slate-900 border border-slate-700 rounded-lg pl-7 pr-2 py-1.5 text-xs font-bold text-emerald-400 focus:outline-none focus:border-amber-400 transition-colors"
-                          />
+
+                        <div className="flex items-start space-x-2">
+                          <Navigation className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="text-[10px] text-slate-500 uppercase font-semibold">
+                              Destino
+                            </p>
+                            <p className="text-slate-200 line-clamp-1">
+                              {destinationText}
+                            </p>
+                          </div>
                         </div>
-                        <button
-                          onClick={() =>
-                            handleOfferOrAccept(order, currentRate)
-                          }
-                          disabled={loading}
-                          className={`px-3 py-1.5 font-bold rounded-lg text-xs transition-all shadow-md shrink-0 active:scale-95 ${
-                            isCustomRate
-                              ? "bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-amber-500/10"
-                              : "bg-emerald-500 hover:bg-emerald-400 text-slate-950 shadow-emerald-500/10"
-                          }`}
-                        >
-                          {isCustomRate ? "Enviar Oferta" : "Aceptar"}
-                        </button>
                       </div>
-                    )}
-                  </div>
-                );
-              })
+
+                      {/* BOTÓN DIRECTO DE ACEPTAR */}
+                      <button
+                        onClick={() => handleAcceptOrder(ord)}
+                        disabled={loading || !!activeOrder}
+                        className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition-colors shadow-lg flex justify-center items-center space-x-2 disabled:opacity-50"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        <span>Aceptar Carrera</span>
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}
       </main>
+
+      {/* 3. TARJETA FLOTANTE (CARRERA EN CURSO) */}
+      {activeOrder &&
+        (() => {
+          const item = activeOrder?.items?.[0] || {};
+
+          // EXTRACCIÓN ROBUSTA DE ORIGEN EN CARRERA ACTIVA
+          const activeOriginText =
+            item.origen ||
+            item.origin ||
+            item.pickupAddress ||
+            item.originAddress ||
+            activeOrder.origen ||
+            activeOrder.origin ||
+            activeOrder.pickupAddress ||
+            activeOrder.originAddress ||
+            "Origen no especificado";
+
+          // EXTRACCIÓN ROBUSTA DE DESTINO EN CARRERA ACTIVA
+          const activeDestinationText =
+            item.detalle ||
+            item.destino ||
+            item.destination ||
+            item.dropoffAddress ||
+            item.description ||
+            activeOrder.detalle ||
+            activeOrder.destino ||
+            activeOrder.destination ||
+            activeOrder.destinationAddress ||
+            "Destino no especificado";
+
+          const activeCustomerName =
+            activeOrder.customer?.name ||
+            activeOrder.customerName ||
+            activeOrder.clientName ||
+            activeOrder.passengerName ||
+            "Cliente";
+
+          const activeCustomerPhone =
+            activeOrder.customer?.phone ||
+            activeOrder.clientPhone ||
+            activeOrder.customerPhone;
+
+          // Normalizar estado (Soporta minúsculas y mayúsculas de MongoDB)
+          const currentStatus = (activeOrder.status || "").toLowerCase();
+
+          return (
+            <div className="fixed bottom-2 left-2 right-2 max-w-lg mx-auto z-30 transition-all duration-300">
+              <div className="bg-slate-900 border border-amber-500/50 rounded-2xl shadow-2xl p-3.5 backdrop-blur-md max-h-[80vh] flex flex-col justify-between overflow-y-auto">
+                {/* CABECERA CON BOTÓN PARA MINIMIZAR/COLAPSAR */}
+                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
+                  <div className="flex items-center space-x-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                    </span>
+                    <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                      Carrera en Curso
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    {/* BOTÓN COLAPSAR / EXPANDIR TARJETA */}
+                    <button
+                      onClick={() => setIsMinimized(!isMinimized)}
+                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg text-xs"
+                      title={isMinimized ? "Expandir" : "Minimizar"}
+                    >
+                      {isMinimized ? (
+                        <ChevronUp className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                    </button>
+
+                    {/* BOTÓN CHAT */}
+                    <button
+                      onClick={() => setIsChatOpen(!isChatOpen)}
+                      className="bg-slate-800 hover:bg-slate-700 text-amber-400 p-1.5 rounded-lg text-xs flex items-center space-x-1 border border-amber-500/20"
+                    >
+                      <MessageSquare className="w-4 h-4" />
+                    </button>
+
+                    {/* BOTÓN LLAMAR */}
+                    {activeCustomerPhone && (
+                      <a
+                        href={`tel:${activeCustomerPhone}`}
+                        className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 p-1.5 rounded-lg text-xs border border-emerald-500/30"
+                      >
+                        <Phone className="w-4 h-4" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* CONTENIDO (SE OCULTA SI ESTÁ MINIMIZADO) */}
+                {!isMinimized && (
+                  <>
+                    {/* DETALLES CLIENTE */}
+                    <div className="grid grid-cols-2 gap-2 my-2 text-xs">
+                      <div>
+                        <p className="text-[10px] text-slate-500 uppercase">
+                          Cliente
+                        </p>
+                        <p className="font-semibold text-slate-200 truncate">
+                          {activeCustomerName}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] text-slate-500 uppercase">
+                          Estado
+                        </p>
+                        <p className="font-bold text-amber-400 text-xs capitalize">
+                          {currentStatus.replace("_", " ")}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* RUTA Y DIRECCIONES */}
+                    <div className="space-y-2 mb-3 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 text-xs">
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center space-x-2 overflow-hidden">
+                          <MapPin className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span className="truncate text-slate-200 text-xs font-medium">
+                            {activeOriginText}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center">
+                        <div className="flex items-center space-x-2 overflow-hidden">
+                          <Navigation className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="truncate text-slate-200 text-xs font-medium">
+                            {activeDestinationText}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* BOTONES DE ACCIÓN (SIEMPRE VISIBLES INCLUSO MINIMIZADO) */}
+                <div className="pt-1">
+                  {/* ESTADOS DONDE SE MUESTRA "INICIAR VIAJE" */}
+                  {[
+                    "accepted",
+                    "aceptado",
+                    "assigned",
+                    "asignado",
+                    "assigned_driver",
+                    "pending_driver",
+                  ].includes(currentStatus) && (
+                    <button
+                      onClick={() => handleUpdateStatus("IN_PROGRESS")}
+                      disabled={loading}
+                      className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
+                    >
+                      <Navigation className="w-4 h-4" />
+                      <span>Iniciar Viaje (En camino)</span>
+                    </button>
+                  )}
+
+                  {/* ESTADOS DONDE SE MUESTRA "FINALIZAR CARRERA" */}
+                  {[
+                    "in_progress",
+                    "en_camino",
+                    "en camino",
+                    "inprogress",
+                  ].includes(currentStatus) && (
+                    <button
+                      onClick={() => handleUpdateStatus("COMPLETED")}
+                      disabled={loading}
+                      className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
+                    >
+                      <CheckCircle className="w-4 h-4" />
+                      <span>Finalizar Carrera</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      {/* 4. MODAL DESPLEGABLE DEL CHAT */}
+      {isChatOpen && activeOrder && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-end sm:items-center justify-center p-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg h-[80vh] flex flex-col justify-between overflow-hidden shadow-2xl">
+            {/* CABECERA CHAT */}
+            <div className="p-3 bg-slate-800/80 border-b border-slate-700 flex justify-between items-center">
+              <div className="flex items-center space-x-2">
+                <MessageSquare className="w-4 h-4 text-amber-400" />
+                <span className="font-bold text-xs text-slate-200">
+                  Chat con{" "}
+                  {activeOrder.customer?.name ||
+                    activeOrder.clientName ||
+                    activeOrder.passengerName ||
+                    "Cliente"}
+                </span>
+              </div>
+              <button
+                onClick={() => setIsChatOpen(false)}
+                className="text-slate-400 hover:text-slate-100 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* MENSAJES */}
+            <div className="p-3 flex-1 overflow-y-auto space-y-2 text-xs">
+              {chatMessages.length === 0 ? (
+                <p className="text-slate-500 text-center py-8">
+                  Envía un mensaje para ponerte en contacto con el cliente...
+                </p>
+              ) : (
+                chatMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    className={`max-w-[80%] p-2.5 rounded-2xl ${
+                      (msg.senderType || "").toLowerCase() === "driver"
+                        ? "bg-amber-500/20 text-amber-200 border border-amber-500/30 ml-auto rounded-br-none"
+                        : "bg-slate-800 text-slate-200 border border-slate-700 mr-auto rounded-bl-none"
+                    }`}
+                  >
+                    <p>{msg.text}</p>
+                    <span className="text-[9px] text-slate-400 block text-right mt-1">
+                      {msg.timestamp
+                        ? new Date(msg.timestamp).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })
+                        : ""}
+                    </span>
+                  </div>
+                ))
+              )}
+              {/* Referencia para auto-scroll dinámico */}
+              <div ref={chatEndRef} />
+            </div>
+
+            {/* INPUT MENSAJE */}
+            <form
+              onSubmit={handleSendMessage}
+              className="p-3 bg-slate-800/50 border-t border-slate-800 flex space-x-2"
+            >
+              <input
+                type="text"
+                placeholder="Escribe un mensaje..."
+                value={newMessageText}
+                onChange={(e) => setNewMessageText(e.target.value)}
+                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+              />
+              <button
+                type="submit"
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 p-2.5 rounded-xl transition-colors"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

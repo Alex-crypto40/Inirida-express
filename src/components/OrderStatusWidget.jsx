@@ -16,6 +16,12 @@ export default function OrderStatusWidget({
   const [loadingAction, setLoadingAction] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
 
+  // ESTADOS PARA CALIFICACIÓN
+  const [rating, setRating] = useState(5);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [ratingComment, setRatingComment] = useState("");
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+
   const showChatRef = useRef(showChat);
 
   const checkIsRide = (order) => {
@@ -76,7 +82,6 @@ export default function OrderStatusWidget({
           if (
             foundOrder &&
             foundOrder._id &&
-            foundOrder.status !== "completed" &&
             foundOrder.status !== "cancelled"
           ) {
             setActiveOrder(foundOrder);
@@ -121,14 +126,13 @@ export default function OrderStatusWidget({
             ...(typeof updatedOrder === "object" ? updatedOrder : {}),
           };
 
-          if (
-            nextState.status === "completed" ||
-            nextState.status === "cancelled"
-          ) {
+          if (nextState.status === "cancelled") {
             localStorage.removeItem("activeOrderId");
             return null;
           }
 
+          // NOTA: Cuando es 'completed', NO limpiamos localStorage ni volvemos null aquí,
+          // para permitir que se muestre el panel de calificación del servicio.
           return nextState;
         });
       }
@@ -243,6 +247,28 @@ export default function OrderStatusWidget({
 
   const driver =
     activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
+
+  // AJUSTE REALIZADO: Búsqueda exhaustiva de la placa y tipo de vehículo en diferentes posibles ubicaciones del backend
+  const displayPlate =
+    driver?.plateNumber ||
+    driver?.plate ||
+    driver?.placa ||
+    driver?.vehiclePlate ||
+    driver?.vehicle?.plate ||
+    driver?.vehicle?.placa ||
+    driver?.vehicle?.plateNumber ||
+    activeOrder?.vehiclePlate ||
+    activeOrder?.plate ||
+    activeOrder?.placa ||
+    "Sin placa";
+
+  const displayVehicleType =
+    driver?.vehicleType ||
+    driver?.vehicle?.type ||
+    driver?.vehicle?.vehicleType ||
+    activeOrder?.vehicleType ||
+    "Motocarro";
+
   const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
 
   const customerId =
@@ -341,6 +367,35 @@ export default function OrderStatusWidget({
     }
   };
 
+  // HANDLER PARA CALIFICACIÓN
+  const handleRateDriver = async () => {
+    setLoadingAction(true);
+    try {
+      await fetch(`${API_URL}/orders/${activeOrder._id}/rate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rating,
+          comment: ratingComment,
+        }),
+      });
+      setRatingSubmitted(true);
+    } catch (e) {
+      console.error("Error al calificar:", e);
+    } finally {
+      setLoadingAction(false);
+      setTimeout(() => {
+        localStorage.removeItem("activeOrderId");
+        setActiveOrder(null);
+      }, 1500);
+    }
+  };
+
+  const handleCloseCompleted = () => {
+    localStorage.removeItem("activeOrderId");
+    setActiveOrder(null);
+  };
+
   return (
     <>
       <div
@@ -365,29 +420,31 @@ export default function OrderStatusWidget({
                   ? "bg-amber-100 text-amber-800 border border-amber-300 animate-pulse"
                   : isAccepted
                     ? "bg-emerald-500 text-white shadow-xs"
-                    : "bg-gray-500 text-white"
+                    : "bg-emerald-600 text-white"
             }`}
           >
             {hasCounterOffer && "¡Nueva Oferta Recibida!"}
             {isPending && "Buscando motocarro..."}
             {isAccepted && "En camino"}
-            {isCompleted && "Carrera finalizada"}
+            {isCompleted && "¡Finalizado!"}
           </span>
         </div>
 
         {/* Detalle de ruta */}
-        <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1 text-xs">
-          <div className="flex items-center gap-1.5 text-gray-700">
-            <span className="text-green-600 font-bold">📍 Origen:</span>
-            <span className="truncate font-medium">{origenAddress}</span>
-          </div>
-          {destinoNotes && (
+        {!isCompleted && (
+          <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1 text-xs">
             <div className="flex items-center gap-1.5 text-gray-700">
-              <span className="text-orange-600 font-bold">🏁 Detalle:</span>
-              <span className="truncate font-medium">{destinoNotes}</span>
+              <span className="text-green-600 font-bold">📍 Origen:</span>
+              <span className="truncate font-medium">{origenAddress}</span>
             </div>
-          )}
-        </div>
+            {destinoNotes && (
+              <div className="flex items-center gap-1.5 text-gray-700">
+                <span className="text-orange-600 font-bold">🏁 Detalle:</span>
+                <span className="truncate font-medium">{destinoNotes}</span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Contraoferta */}
         {hasCounterOffer && activeCounterOffer && (
@@ -479,13 +536,13 @@ export default function OrderStatusWidget({
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-gray-500 font-medium">🛵 Vehículo:</span>
                 <span className="font-bold text-gray-700 capitalize">
-                  {driver?.vehicleType || "Motocarro"}
+                  {displayVehicleType}
                 </span>
               </div>
               <div className="d-flex justify-content-between align-items-center">
                 <span className="text-gray-500 font-medium">💳 Placa:</span>
                 <span className="badge bg-dark text-white px-2 py-1 font-mono rounded-lg tracking-wider">
-                  {driver?.plateNumber || driver?.plate || "MTC-001"}
+                  {displayPlate}
                 </span>
               </div>
             </div>
@@ -517,13 +574,69 @@ export default function OrderStatusWidget({
           </div>
         )}
 
-        {/* Finalizada */}
+        {/* Carrera Finalizada / Formulario de Calificación */}
         {isCompleted && (
-          <div className="text-center my-2 p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
-            <span className="text-xl">🎉</span>
-            <p className="text-xs font-bold text-emerald-800 mb-0 mt-1">
-              ¡Llegaste a tu destino con éxito!
-            </p>
+          <div className="text-center my-1 space-y-2">
+            {ratingSubmitted ? (
+              <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200">
+                <span className="text-2xl">🎉</span>
+                <p className="text-xs font-extrabold text-emerald-800 mb-0 mt-1">
+                  ¡Gracias por calificar el servicio!
+                </p>
+              </div>
+            ) : (
+              <div className="p-3 bg-gradient-to-br from-amber-50 to-orange-50 rounded-2xl border border-orange-200 text-center space-y-2">
+                <p className="text-xs font-extrabold text-gray-800 m-0">
+                  🎉 ¡Llegaste a tu destino!
+                </p>
+                <p className="text-[11px] text-gray-600 m-0">
+                  ¿Cómo estuvo tu servicio con{" "}
+                  <strong>{driver?.name || "el conductor"}</strong>?
+                </p>
+
+                {/* Calificación por estrellas */}
+                <div className="flex justify-center gap-1 my-1">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setRating(star)}
+                      onMouseEnter={() => setHoverRating(star)}
+                      onMouseLeave={() => setHoverRating(0)}
+                      className="text-2xl cursor-pointer transition-transform active:scale-125 border-none bg-transparent"
+                    >
+                      {(hoverRating || rating) >= star ? "⭐" : "🌟"}
+                    </button>
+                  ))}
+                </div>
+
+                <input
+                  type="text"
+                  placeholder="Comentario breve (opcional)..."
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  className="w-full p-2 text-xs bg-white border border-gray-200 rounded-xl outline-none"
+                />
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleCloseCompleted}
+                    className="w-1/3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold text-xs rounded-xl border-none cursor-pointer"
+                  >
+                    Omitir
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loadingAction}
+                    onClick={handleRateDriver}
+                    className="w-2/3 py-2 bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-xs rounded-xl border-none shadow-xs cursor-pointer"
+                  >
+                    {loadingAction ? "Enviando..." : "Enviar Calificación 🚀"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

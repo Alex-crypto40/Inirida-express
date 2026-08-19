@@ -9,11 +9,18 @@ const messageSchema = new mongoose.Schema(
       required: true,
     },
 
-    // Tipo de remitente: cliente, comercio o repartidor 👤
+    // ID único del remitente (Opcional) 🆔
+    senderId: {
+      type: mongoose.Schema.Types.Mixed,
+      default: null,
+    },
+
+    // Tipo de remitente: cliente, comercio, repartidor o sistema 👤
     senderRole: {
       type: String,
-      enum: ["client", "store", "driver"],
+      enum: ["client", "user", "customer", "store", "driver", "system"],
       required: true,
+      default: "user",
     },
 
     // Nombre legible de la persona que envía el mensaje ✏️
@@ -21,6 +28,7 @@ const messageSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      default: "Usuario",
     },
 
     // Contenido del mensaje 💬

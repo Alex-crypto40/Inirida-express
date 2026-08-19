@@ -5,69 +5,67 @@ import {
   getActiveDriverOrder,
   getOrderById,
   getOrderMessages,
+  createMessage,
   takeOrder,
-  sendCounterOffer,
-  respondCounterOffer,
   updateOrderStatus,
   updateDriverLocation,
   rateOrder,
   cancelOrder,
-  // IMPORTANTE: Asegúrate de tener exportada esta función en tu orderController.js
-  // completeOrder
+  sendCounterOffer,
+  respondCounterOffer,
 } from "./orderController.js";
 
 const router = express.Router();
 
 /* ==========================================================================
-   1. Rutas Estáticas y Específicas (Deben ir ANTES de las rutas con /:orderId)
+   1. Rutas Estáticas y Específicas (Deben ir ANTES de /:orderId)
    ========================================================================== */
 
 // Crear un nuevo pedido / carrera
 router.post("/", createOrder);
 
-// Obtener pedidos disponibles para conductores
+// Obtener carreras disponibles para conductores
 router.get("/available", getAvailableOrders);
 
-// CORRECCIÓN: Ajustado para que coincida con el fetch del frontend: /orders/active/driver/${driverId}
+// Obtener carrera activa del conductor (Soporta ambas estructuras de URL)
+router.get("/driver-active/:driverId", getActiveDriverOrder);
 router.get("/active/driver/:driverId", getActiveDriverOrder);
+
+// Aceptar / tomar carrera por el conductor (Soporta /take/:orderId)
+router.post("/take/:orderId", takeOrder);
 
 /* ==========================================================================
    2. Rutas Parametrizadas por Pedido (/:orderId/...)
    ========================================================================== */
 
-// Obtener un pedido por ID (Mantiene actualizado el frontend/polling)
+// Obtener un pedido por ID (Polling / Detalles)
 router.get("/:orderId", getOrderById);
 
-// Obtener el historial de mensajes del chat de un pedido
+// Historial y envío de mensajes del chat (HTTP REST Fallback + Polling)
 router.get("/:orderId/messages", getOrderMessages);
+router.post("/:orderId/messages", createMessage);
 
-// CORRECCIÓN: Ajustado a /accept para evitar el error 404 (Frontend hace POST a /accept)
+// Aceptar carrera directamente por el conductor (Ruta alternativa)
 router.post("/:orderId/accept", takeOrder);
 
-// NUEVO: El frontend hace POST a /complete para verificar el PIN y finalizar.
-// Asigna esto a tu controlador de finalización (ej: completeOrder o updateOrderStatus)
+// Enviar y responder contraofertas de precio
+router.post("/:orderId/counter-offer", sendCounterOffer);
+router.post("/:orderId/respond-counter-offer", respondCounterOffer);
+
+// Finalizar / Completar carrera (soporta PIN o cambio de estado)
 router.post("/:orderId/complete", updateOrderStatus);
 
-// 🤝 CONTRAOFERTAS
-router.post("/:orderId/counter-offer", sendCounterOffer);
-// 👈 2. Nueva ruta para que el cliente Acepte o Rechace la propuesta
-router.post("/:orderId/respond-counter", respondCounterOffer);
-router.patch("/:orderId/respond-counter", respondCounterOffer);
-
-// Enviar contraoferta al cliente (Motocarros / Domiciliarios)
-router.post("/:orderId/counter-offer", sendCounterOffer);
-
-// Actualizar ubicación GPS en tiempo real del mototaxista (Soporta PUT y PATCH)
+// Actualización de ubicación GPS del conductor en tiempo real
 router.put("/:orderId/location", updateDriverLocation);
 router.patch("/:orderId/location", updateDriverLocation);
 
-// Cancelar carrera / pedido (Resuelve la cancelación explícita)
+// Cancelar carrera / pedido
 router.patch("/:orderId/cancel", cancelOrder);
 
-// Actualizar estado general del pedido (at_store, on_the_way, etc.)
+// Actualizar estado general de la carrera (on_the_way, completed, etc.)
 router.patch("/:orderId/status", updateOrderStatus);
 
-// Calificar la entrega / carrera
+// Calificar el servicio
 router.patch("/:orderId/rate", rateOrder);
 
 export default router;

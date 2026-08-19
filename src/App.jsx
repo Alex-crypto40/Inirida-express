@@ -29,7 +29,14 @@ import DriverLogin from "./views/DriverLogin";
 
 // URL de tu servidor backend en Render o localhost
 const SOCKET_URL =
-  import.meta.env.VITE_BACKEND_URL || "https://inirida-express.onrender.com";
+  import.meta.env.VITE_SOCKET_URL ||
+  (window.location.hostname === "localhost"
+    ? "http://localhost:5000"
+    : "https://inirida-express.onrender.com");
+
+const socket = io(SOCKET_URL, {
+  transports: ["polling", "websocket"],
+});
 
 // Vista para la convocatoria de domiciliarios
 function Repartidores() {
@@ -60,7 +67,7 @@ function App() {
   useEffect(() => {
     // Inicializar la conexión de WebSockets de forma global
     const newSocket = io(SOCKET_URL, {
-      transports: ["websocket", "polling"],
+      transports: ["polling", "websocket"],
       withCredentials: true,
     });
 

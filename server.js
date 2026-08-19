@@ -20,6 +20,7 @@ import productRoutes from "./backend/productRoutes.js";
 import driverRoutes from "./backend/driverRoutes.js";
 import orderRoutes from "./backend/orderRoutes.js";
 import Message from "./backend/Message.js";
+import authRoutes from "./backend/authRoutes.js";
 
 const app = express();
 
@@ -51,15 +52,9 @@ const corsOptions = {
   allowedHeaders: ["Content-Type", "Authorization"],
 };
 
-// Middlewares
+// Middlewares Globales
 app.use(cors(corsOptions));
 app.use(express.json());
-
-// Servir archivos estáticos del build de React (Vite)
-const distPath = path.join(__dirname, "dist");
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-}
 
 // 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
@@ -71,7 +66,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["polling", "websocket"],
+  transports: ["websocket", "polling"], // Prioridad WebSocket para evitar bloqueos HTTP 400 en Render
   pingTimeout: 90000,
   pingInterval: 25000,
   connectTimeout: 45000,
@@ -115,12 +110,15 @@ io.on("connection", (socket) => {
       driverName,
       phone,
       vehicleType,
+      vehiclePlate,
       lat,
       lng,
       isAvailable,
       heading,
+      speed,
     } = data;
 
+    // Validación básica de datos obligatorios
     if (!driverId || lat === undefined || lng === undefined) return;
 
     if (isAvailable !== false) {
@@ -129,23 +127,28 @@ io.on("connection", (socket) => {
         driverName: driverName || "Motocarro Express",
         phone: phone || "",
         vehicleType: vehicleType || "motocarro",
+        vehiclePlate: vehiclePlate || "",
         lat: Number(lat),
         lng: Number(lng),
         heading: heading ? Number(heading) : 0,
+        speed: speed ? Number(speed) : 0,
         socketId: socket.id,
         isAvailable: true,
         updatedAt: new Date(),
       };
 
+      // Guardar o actualizar en el Map en memoria
       activeDriversLocations.set(driverId, driverInfo);
 
-      // Difundir la posición a todos los mapas en vivo activos
+      // 📡 Emisión a clientes
       io.emit("driver_location_changed", driverInfo);
+      io.emit("driver_location_updated", driverInfo);
       io.emit(
         "drivers_online_list",
         Array.from(activeDriversLocations.values()),
       );
     } else {
+      // Si el conductor se puso Ocupado o Desconectado
       activeDriversLocations.delete(driverId);
       io.emit("driver_disconnected_location", { driverId });
       io.emit(
@@ -167,12 +170,24 @@ io.on("connection", (socket) => {
     }
   });
 
+  // 🔄 Transmisión de cambios de estado globales de órdenes
+  socket.on("update_order_status_global", (updatedOrder) => {
+    if (!updatedOrder) return;
+    io.emit("order_status_updated", updatedOrder);
+    io.emit("orderUpdated", updatedOrder);
+    if (updatedOrder._id) {
+      io.to(`order_${updatedOrder._id}`).emit(
+        "order:status_updated",
+        updatedOrder,
+      );
+    }
+  });
+
   // 🟢 Unirse a la sala única del pedido
   const joinOrderRoomHandler = (orderId) => {
     if (!orderId) return;
     const cleanId = String(orderId).replace(/^order_/, "");
 
-    // Evitamos suscribir si el socket ya está en la sala
     if (!socket.rooms.has(cleanId)) {
       socket.join(cleanId);
       socket.join(`order_${cleanId}`);
@@ -181,8 +196,9 @@ io.on("connection", (socket) => {
       );
     }
   };
-  // Escucha solo un evento estandarizado para evitar ejecuciones dobles
+
   socket.on("join_order", joinOrderRoomHandler);
+  socket.on("join", joinOrderRoomHandler);
 
   // 🟢 Salir de la sala del pedido
   const leaveOrderRoomHandler = (orderId) => {
@@ -219,22 +235,18 @@ io.on("connection", (socket) => {
       });
       await newMessage.save();
 
-      // Emitir a la sala en los formatos soportados
+      // Emitir a la sala en todos los alias soportados
       io.to(cleanOrderId)
         .to(`order_${cleanOrderId}`)
         .emit("receive_message", newMessage);
 
       io.to(cleanOrderId)
         .to(`order_${cleanOrderId}`)
+        .emit("newMessage", newMessage);
+
+      io.to(cleanOrderId)
+        .to(`order_${cleanOrderId}`)
         .emit("new_chat_message", newMessage);
-
-      io.to(cleanOrderId)
-        .to(`order_${cleanOrderId}`)
-        .emit("chat_message", newMessage);
-
-      io.to(cleanOrderId)
-        .to(`order_${cleanOrderId}`)
-        .emit("new_message", newMessage);
     } catch (error) {
       console.error("Error al guardar/transmitir mensaje en WebSocket:", error);
     }
@@ -243,7 +255,7 @@ io.on("connection", (socket) => {
   socket.on("send_message", handleSendMessage);
   socket.on("send_chat_message", handleSendMessage);
 
-  // Desconexión con tolerancia a parpadeos de red móvil
+  // Desconexión con tolerancia a redes móviles
   socket.on("disconnect", () => {
     console.log(`❌ Usuario desconectado del WebSocket: ${socket.id}`);
 
@@ -266,13 +278,23 @@ io.on("connection", (socket) => {
   });
 });
 
-// Rutas de la API
+/* ==========================================================================
+   6. Rutas de la API (DEBEN IR ANTES DE LOS ARCHIVOS ESTÁTICOS)
+   ========================================================================== */
+app.use("/api/auth", authRoutes);
 app.use("/api/stores", storeRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/drivers", driverRoutes);
 app.use("/api/orders", orderRoutes);
 
-// 🌐 Ruta comodín para SPA
+/* ==========================================================================
+   7. Servir Frontend y SPA Fallback
+   ========================================================================== */
+const distPath = path.join(__dirname, "dist");
+if (fs.existsSync(distPath)) {
+  app.use(express.static(distPath));
+}
+
 app.get(/^(?!\/socket\.io\/).*/, (req, res) => {
   const indexPath = path.join(distPath, "index.html");
   if (fs.existsSync(indexPath)) {

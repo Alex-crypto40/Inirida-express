@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const API_URL =
-  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+// Aseguramos que API_URL no termine en barra ni duplique /api
+const RAW_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const API_URL = RAW_URL.replace(/\/+$/, "");
 
 export default function DriverLogin() {
   const [isRegister, setIsRegister] = useState(false);
@@ -36,7 +37,7 @@ export default function DriverLogin() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // 1. Validaciones previas en el Frontend para Registro
+    // 1. Validaciones previas para Registro
     if (isRegister) {
       const { name, phone, email, password, vehicleType, vehiclePlate } =
         formData;
@@ -46,16 +47,21 @@ export default function DriverLogin() {
         return;
       }
 
-      // Si el vehículo NO es bicicleta, la placa es 100% obligatoria
       if (vehicleType !== "bicicleta" && !vehiclePlate.trim()) {
         alert("La placa del vehículo es obligatoria para motos y motocarros.");
         return;
       }
     }
 
-    const endpoint = isRegister ? "/drivers/register" : "/drivers/login";
+    // Definición explícita de rutas relativas
+    const path = isRegister ? "/drivers/register" : "/drivers/login";
 
-    // 2. Preparar el payload enviando 'N/A' en la placa si es bicicleta sin placa
+    // Si API_URL ya incluye '/api', la ruta completa es `${API_URL}${path}`
+    // Si API_URL no incluye '/api', aseguramos incluirlo
+    const fullUrl = API_URL.endsWith("/api")
+      ? `${API_URL}${path}`
+      : `${API_URL}/api${path}`;
+
     const payload = {
       ...formData,
       vehiclePlate:
@@ -64,15 +70,17 @@ export default function DriverLogin() {
           : formData.vehiclePlate.trim().toUpperCase(),
     };
 
+    const requestBody = isRegister
+      ? payload
+      : { email: formData.email, password: formData.password };
+
     try {
-      const res = await fetch(`${API_URL}${endpoint}`, {
+      console.log(`📡 Enviando solicitud a: ${fullUrl}`);
+
+      const res = await fetch(fullUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          isRegister
-            ? payload
-            : { email: formData.email, password: formData.password }
-        ),
+        body: JSON.stringify(requestBody),
       });
 
       const data = await res.json();
@@ -83,23 +91,29 @@ export default function DriverLogin() {
           toggleRegisterMode();
         } else {
           // Extraer la información del conductor devuelta por la API
-          const driverData = data.driver || data;
+          const driverData = data.driver || data.user || data;
           const driverId = driverData._id || driverData.id || data.driverId;
 
           if (driverId) {
-            // Guardar ID directo e información completa en localStorage
+            // Guardar en localStorage
             localStorage.setItem("driverId", driverId);
             localStorage.setItem("driverInfo", JSON.stringify(driverData));
             localStorage.setItem("driverData", JSON.stringify(driverData));
+            if (data.token) {
+              localStorage.setItem("token", data.token);
+            }
             navigate("/driver");
           } else {
-            alert("Respuesta del servidor inválida: No se recibió el ID del conductor.");
+            alert(
+              "Respuesta del servidor inválida: No se recibió el ID del conductor.",
+            );
           }
         }
       } else {
         alert(data.message || "Error al procesar la solicitud.");
       }
     } catch (error) {
+      console.error("Error en petición login:", error);
       alert("Error de conexión con el servidor.");
     }
   };

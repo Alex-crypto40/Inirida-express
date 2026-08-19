@@ -1,8 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
 import io from "socket.io-client";
 
-const RAW_API =
-  import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+// Detección de entorno local vs producción
+const IS_PROD = window.location.hostname !== "localhost";
+
+const BASE_DOMAIN = IS_PROD
+  ? "https://inirida-express.onrender.com"
+  : "http://localhost:5000";
+
+const RAW_API = import.meta.env.VITE_API_URL || BASE_DOMAIN;
 const BASE_URL = RAW_API.replace(/\/api\/?$/, "");
 
 const OrderChatModal = ({
@@ -14,6 +20,7 @@ const OrderChatModal = ({
 }) => {
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
+  const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null);
   const chatBottomRef = useRef(null);
 
@@ -42,7 +49,7 @@ const OrderChatModal = ({
   useEffect(() => {
     if (!orderId) return;
 
-    // Fetch del historial de mensajes
+    // 1. Fetch del historial de mensajes via HTTP
     const fetchHistory = async () => {
       try {
         const response = await fetch(
@@ -67,22 +74,39 @@ const OrderChatModal = ({
 
     fetchHistory();
 
-    // Conexión Socket.io con reintento adaptable
+    // 2. Conexión Socket.io optimizada para Render
     socketRef.current = io(BASE_URL, {
-      transports: ["polling", "websocket"],
-      reconnectionAttempts: 10,
-      pingTimeout: 90000,
+      transports: ["websocket", "polling"], // Intentar websocket primero
+      reconnection: true,
+      reconnectionAttempts: 15,
+      reconnectionDelay: 1000,
+      timeout: 20000,
+      withCredentials: false,
     });
 
     const joinRoom = () => {
       if (socketRef.current) {
-        // Emitimos solo la clave principal estandarizada
+        setIsConnected(true);
         socketRef.current.emit("join_order", orderId);
+        socketRef.current.emit("join", orderId); // Fallback room name
       }
     };
 
-    // Escuchamos conexión y reconexión de red
+    // Manejadores de conexión
     socketRef.current.on("connect", joinRoom);
+
+    socketRef.current.on("disconnect", () => {
+      setIsConnected(false);
+    });
+
+    socketRef.current.on("connect_error", (err) => {
+      console.warn(
+        "Socket conexión fallida, reintentando con polling...",
+        err.message,
+      );
+      setIsConnected(false);
+    });
+
     socketRef.current.io.on("reconnect", joinRoom);
 
     // Manejador único de mensajes entrantes
@@ -91,7 +115,9 @@ const OrderChatModal = ({
         const isDuplicate = prev.some((m) => {
           if (m._id && newMessage._id && m._id === newMessage._id) return true;
           const sameText = m.text === newMessage.text;
-          const sameRole = m.senderRole === newMessage.senderRole;
+          const sameRole =
+            (m.senderRole || m.senderType) ===
+            (newMessage.senderRole || newMessage.senderType);
           const timeDiff = Math.abs(
             new Date(m.createdAt || Date.now()) -
               new Date(newMessage.createdAt || Date.now()),
@@ -104,14 +130,18 @@ const OrderChatModal = ({
       });
     };
 
-    // Escuchar ÚNICAMENTE el evento estándar para evitar disparos cuádruples
+    // Escuchar eventos estándar de Socket
     socketRef.current.on("receive_message", handleReceiveMessage);
+    socketRef.current.on("newMessage", handleReceiveMessage);
 
     return () => {
       if (socketRef.current) {
         socketRef.current.emit("leave_order", orderId);
         socketRef.current.off("receive_message", handleReceiveMessage);
+        socketRef.current.off("newMessage", handleReceiveMessage);
         socketRef.current.off("connect", joinRoom);
+        socketRef.current.off("disconnect");
+        socketRef.current.off("connect_error");
         socketRef.current.io.off("reconnect", joinRoom);
         socketRef.current.disconnect();
       }
@@ -122,38 +152,71 @@ const OrderChatModal = ({
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSendMessage = (e) => {
+  // Envío con Fallback HTTP REST
+  const handleSendMessage = async (e) => {
     e.preventDefault();
     const cleanText = text.trim();
     if (!cleanText) return;
 
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const messageData = {
-      _id: `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      _id: tempId,
       orderId,
       senderRole: role,
+      senderType: role,
       senderName: name,
       text: cleanText,
       createdAt: new Date().toISOString(),
     };
 
-    // Actualización optimista
+    // Actualización optimista en UI
     setMessages((prev) => [...prev, messageData]);
+    setText("");
 
+    let sentViaSocket = false;
+
+    // Intentar envío vía Socket
     if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit("send_message", {
-        orderId,
-        senderRole: role,
-        senderName: name,
-        text: cleanText,
-        createdAt: messageData.createdAt,
-      });
+      try {
+        socketRef.current.emit("send_message", {
+          orderId,
+          senderRole: role,
+          senderType: role,
+          senderName: name,
+          text: cleanText,
+          createdAt: messageData.createdAt,
+        });
+        sentViaSocket = true;
+      } catch (err) {
+        console.warn(
+          "Fallo emitiendo por socket, enviando vía HTTP REST...",
+          err,
+        );
+      }
     }
 
-    setText("");
+    // Respando vía HTTP POST si Socket falló o está desconectado
+    if (!sentViaSocket) {
+      try {
+        await fetch(`${BASE_URL}/api/orders/${orderId}/messages`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            senderRole: role,
+            senderType: role,
+            senderName: name,
+            text: cleanText,
+          }),
+        });
+      } catch (error) {
+        console.error("Error al enviar mensaje por HTTP REST:", error);
+      }
+    }
   };
 
   const getRoleBadge = (senderRole) => {
-    switch (senderRole) {
+    const normalizedRole = (senderRole || "").toLowerCase();
+    switch (normalizedRole) {
       case "store":
         return { label: "Comercio 🏪", bg: "bg-orange-100 text-orange-800" };
       case "driver":
@@ -194,9 +257,17 @@ const OrderChatModal = ({
           <div>
             <h3 className="font-bold text-lg flex items-center gap-2">
               💬 Chat del Pedido
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isConnected ? "bg-emerald-400 animate-pulse" : "bg-red-400"
+                }`}
+                title={
+                  isConnected ? "Socket Conectado" : "Conectando Socket..."
+                }
+              />
             </h3>
             <p className="text-xs text-orange-100">
-              Comunicación en tiempo real
+              {isConnected ? "En línea" : "Modo Respaldo (HTTP)"}
             </p>
           </div>
           <button
@@ -219,10 +290,15 @@ const OrderChatModal = ({
             </div>
           ) : (
             messages.map((msg, index) => {
+              const msgRole = (
+                msg.senderRole ||
+                msg.senderType ||
+                ""
+              ).toLowerCase();
               const isMe =
-                msg.senderRole === role ||
-                (role === "client" && msg.senderRole === "customer");
-              const badge = getRoleBadge(msg.senderRole);
+                msgRole === role.toLowerCase() ||
+                (role === "client" && msgRole === "customer");
+              const badge = getRoleBadge(msgRole);
 
               return (
                 <div
@@ -277,7 +353,7 @@ const OrderChatModal = ({
             placeholder="Escribe un mensaje..."
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium"
+            className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium text-slate-800"
           />
           <button
             type="submit"

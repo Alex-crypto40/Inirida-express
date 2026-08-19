@@ -37,9 +37,9 @@ export const registerDriver = async (req, res) => {
       });
     }
 
-    const existingDriver = await Driver.findOne({
-      email: email.toLowerCase().trim(),
-    });
+    const cleanEmail = email.trim().toLowerCase();
+
+    const existingDriver = await Driver.findOne({ email: cleanEmail });
     if (existingDriver) {
       return res.status(400).json({ message: "El correo ya está registrado." });
     }
@@ -49,7 +49,7 @@ export const registerDriver = async (req, res) => {
     const newDriver = new Driver({
       name: name.trim(),
       phone: phone.trim(),
-      email: email.trim(),
+      email: cleanEmail,
       password: hashedPassword,
       vehicleType: selectedVehicle,
       vehiclePlate:
@@ -74,7 +74,7 @@ export const registerDriver = async (req, res) => {
   }
 };
 
-// 2. Login de Domiciliarios
+// 2. Login de Domiciliarios (CORREGIDO)
 export const loginDriver = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -85,10 +85,13 @@ export const loginDriver = async (req, res) => {
         .json({ message: "Correo y contraseña son requeridos." });
     }
 
-    // Incluimos explícitamente la contraseña que fue excluida en el modelo
-    const driver = await Driver.findOne({
-      email: email.toLowerCase().trim(),
-    }).select("+password");
+    // Normalizamos el correo a minúsculas
+    const cleanEmail = email.trim().toLowerCase();
+
+    // Búsqueda directa sin dependencias de $regex
+    const driver = await Driver.findOne({ email: cleanEmail }).select(
+      "+password",
+    );
 
     if (!driver) {
       return res.status(404).json({ message: "Usuario no encontrado." });
@@ -112,11 +115,12 @@ export const loginDriver = async (req, res) => {
       token,
       driver: {
         id: driver._id,
+        _id: driver._id,
         name: driver.name,
         email: driver.email,
         phone: driver.phone,
         vehicleType: driver.vehicleType,
-        vehiclePlate: driver.vehiclePlate, // 👈 Incluido para sincronización con frontend
+        vehiclePlate: driver.vehiclePlate,
         isOnline: driver.isOnline,
         rating: driver.rating,
         completedDeliveries: driver.completedDeliveries || 0,

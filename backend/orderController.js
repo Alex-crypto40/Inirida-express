@@ -1,17 +1,28 @@
+import mongoose from "mongoose";
 import Order from "./Order.js";
 import Message from "./Message.js";
+import Driver from "./Driver.js";
 
-// Helper para generar PIN seguro de 4 dígitos
+// Helper de campos para popular conductor de forma segura (incluye ambos nombres de placa)
+const DRIVER_POPULATE_FIELDS = "name phone vehicleType vehiclePlate plate";
+
+// ==========================================
+// HELPER PARA GENERAR PIN SEGURO
+// ==========================================
 const generateDeliveryPin = () =>
   Math.floor(1000 + Math.random() * 9000).toString();
 
-// 1. Crear un nuevo pedido / carrera
+// ==========================================
+// 1. CREAR UN NUEVO PEDIDO / CARRERA
+// ==========================================
 export const createOrder = async (req, res) => {
   try {
     const {
-      serviceType, // "delivery", "mandado", "ride"
+      serviceType, // "delivery", "mandado", "ride", "carrerita", "motocarro"
       store,
       customer,
+      originAddress,
+      destinationAddress,
       rideDetails, // Pasajeros, maletas, mascotas
       items,
       isMandado,
@@ -24,69 +35,132 @@ export const createOrder = async (req, res) => {
       notes,
     } = req.body;
 
+    // 1. Resolver los datos del cliente con soporte para usuario registrado u objeto invitado
+    const resolvedCustomer = customer ||
+      req.user?._id || {
+        name: "Cliente General",
+        phone: "",
+        address: originAddress || "",
+      };
+
     const deliveryPin = generateDeliveryPin();
 
+    // 2. Instanciación de la Orden
     const newOrder = new Order({
-      serviceType: serviceType || "delivery",
+      serviceType: serviceType || "ride",
       store: store || null,
-      customer: customer || req.user?._id,
-      rideDetails: serviceType === "ride" ? rideDetails : undefined,
+      customer: resolvedCustomer,
+      originAddress: originAddress || "",
+      destinationAddress: destinationAddress || "",
+      rideDetails: rideDetails || {},
       items: items || [],
       isMandado: isMandado || false,
       mandadoDetail: mandadoDetail || "",
       subtotal: subtotal || 0,
       deliveryFee: deliveryFee || 4000,
-      total: total || 0,
+      total: total || deliveryFee || 4000,
       deliveryPin,
       status: "pending_driver",
       counterOffers: [],
       notes: notes || "",
-      // Campos de Geolocalización para MapView.jsx
       originCoords: originCoords || null,
       destinationCoords: destinationCoords || null,
     });
 
     await newOrder.save();
 
-    const populatedOrder = await Order.findById(newOrder._id).populate(
-      "store",
-      "name address phone",
-    );
+    // 3. Poblado Seguro
+    let populatedOrder = newOrder.toObject();
 
+    if (newOrder.store && mongoose.Types.ObjectId.isValid(newOrder.store)) {
+      await newOrder.populate("store", "name address phone originCoords");
+    }
+
+    if (
+      newOrder.customer &&
+      mongoose.Types.ObjectId.isValid(newOrder.customer)
+    ) {
+      await newOrder.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+    }
+
+    populatedOrder = newOrder.toObject();
+
+    // 4. Emisión por WebSockets
     const io = req.app.get("io");
     if (io) {
       io.emit("order:created", populatedOrder);
+      io.emit("order_created", populatedOrder);
     }
 
-    res.status(201).json({
+    return res.status(201).json({
       message: "Solicitud creada exitosamente 🚀",
       order: populatedOrder,
     });
   } catch (error) {
-    console.error("Error al crear pedido/carrera:", error);
-    res
-      .status(500)
-      .json({ message: "Error interno al procesar la solicitud." });
+    console.error("❌ Error crítico al crear pedido/carrera:", error);
+    return res.status(500).json({
+      message: "Error interno al procesar la solicitud.",
+      error: error.message,
+    });
   }
 };
 
-// 2. Obtener pedidos y carreras disponibles para domiciliarios
+// ==========================================
+// 2. OBTENER PEDIDOS Y CARRERAS DISPONIBLES
+// ==========================================
 export const getAvailableOrders = async (req, res) => {
   try {
-    const orders = await Order.find({ status: "pending_driver" })
-      .populate("store", "name address phone")
+    const orders = await Order.find({
+      status: {
+        $in: [
+          "pending_driver",
+          "pending",
+          "PENDING_DRIVER",
+          "PENDING",
+          "searching",
+          "SEARCHING",
+        ],
+      },
+    })
+      .populate("store", "name address phone originCoords")
+      .populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      )
       .sort({ createdAt: -1 });
 
     res.json(orders);
   } catch (error) {
     console.error("Error al obtener pedidos disponibles:", error);
-    res
-      .status(500)
-      .json({ message: "Error al cargar la lista de solicitudes." });
+
+    try {
+      const rawOrders = await Order.find({
+        status: {
+          $in: [
+            "pending_driver",
+            "pending",
+            "PENDING_DRIVER",
+            "PENDING",
+            "searching",
+            "SEARCHING",
+          ],
+        },
+      }).sort({ createdAt: -1 });
+      return res.json(rawOrders);
+    } catch (fallbackError) {
+      res
+        .status(500)
+        .json({ message: "Error al cargar la lista de solicitudes." });
+    }
   }
 };
 
-// 3. Obtener el historial de chat de un pedido
+// ==========================================
+// 3. OBTENER EL HISTORIAL DE CHAT DE UN PEDIDO
+// ==========================================
 export const getOrderMessages = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -98,19 +172,78 @@ export const getOrderMessages = async (req, res) => {
   }
 };
 
-// 4. Tomar una carrera
+// ==========================================
+// 3b. CREAR/ENVIAR MENSAJE VÍA REST
+// ==========================================
+export const createMessage = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { senderRole, senderType, senderName, text } = req.body;
+
+    if (!text || !text.trim()) {
+      return res
+        .status(400)
+        .json({ message: "El mensaje no puede estar vacío." });
+    }
+
+    const newMessage = new Message({
+      orderId,
+      senderRole: senderRole || senderType || "client",
+      senderName: senderName || "Usuario",
+      text: text.trim(),
+      createdAt: new Date(),
+    });
+
+    await newMessage.save();
+
+    const io = req.app.get("io");
+    if (io) {
+      io.to(orderId).emit("receive_message", newMessage);
+      io.to(`order_${orderId}`).emit("receive_message", newMessage);
+      io.to(orderId).emit("newMessage", newMessage);
+      io.to(`order_${orderId}`).emit("newMessage", newMessage);
+    }
+
+    res.status(201).json(newMessage);
+  } catch (error) {
+    console.error("Error al guardar mensaje vía HTTP:", error);
+    res.status(500).json({ message: "Error al enviar el mensaje." });
+  }
+};
+
+// ==========================================
+// 4. TOMAR UNA CARRERA / PEDIDO (DIRECTO A EN CAMINO)
+// ==========================================
 export const takeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const driverId = req.user?._id || req.body.driverId;
+    const driverId = req.user?._id || req.body.driverId || req.body.driver;
 
     if (!driverId) {
       return res.status(401).json({ message: "Repartidor no autenticado." });
     }
 
+    if (
+      typeof driverId === "string" &&
+      !mongoose.Types.ObjectId.isValid(driverId)
+    ) {
+      console.warn(`⚠️ driverId recibido no es ObjectId válido: ${driverId}`);
+    }
+
+    // 1. Validar si el conductor ya posee una carrera activa
     const activeOrder = await Order.findOne({
       driver: driverId,
-      status: { $in: ["assigned", "at_store", "on_the_way"] },
+      _id: { $ne: orderId },
+      status: {
+        $in: [
+          "assigned",
+          "at_store",
+          "on_the_way",
+          "in_progress",
+          "accepted",
+          "en_camino",
+        ],
+      },
     });
 
     if (activeOrder) {
@@ -120,13 +253,23 @@ export const takeOrder = async (req, res) => {
       });
     }
 
+    // 2. Asignar la orden y pasar DIRECTO a 'on_the_way' (En camino)
     let order = await Order.findOneAndUpdate(
-      { _id: orderId, status: "pending_driver" },
-      { driver: driverId, status: "assigned" },
+      {
+        _id: orderId,
+        status: {
+          $in: [
+            "pending_driver",
+            "pending",
+            "searching",
+            "PENDING_DRIVER",
+            "PENDING",
+          ],
+        },
+      },
+      { driver: driverId, status: "on_the_way" },
       { returnDocument: "after" },
-    )
-      .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType vehiclePlate");
+    );
 
     if (!order) {
       return res.status(409).json({
@@ -135,42 +278,84 @@ export const takeOrder = async (req, res) => {
       });
     }
 
+    // 3. Poblados seguros opcionales
+    let populatedOrder = order.toObject();
+
+    try {
+      if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
+        await order.populate("store", "name address phone originCoords");
+      }
+      if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+        await order.populate(
+          "customer",
+          "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+        );
+      }
+      if (order.driver && mongoose.Types.ObjectId.isValid(order.driver)) {
+        await order.populate("driver", DRIVER_POPULATE_FIELDS);
+      }
+      populatedOrder = order.toObject();
+    } catch (popError) {
+      console.warn(
+        "⚠️ Error secundario al popular datos en takeOrder:",
+        popError.message,
+      );
+    }
+
+    // 4. Notificar vía Sockets
     const io = req.app.get("io");
     if (io) {
       io.emit("order:taken", { orderId: order._id, driverId });
-      io.to(`order_${order._id}`).emit("order:status_updated", order);
-      io.to(`order_${order._id}`).emit("orderUpdated", order);
-      io.emit("order_status_updated", order);
+      io.to(`order_${order._id}`).emit("order:status_updated", populatedOrder);
+      io.to(`order_${order._id}`).emit("orderUpdated", populatedOrder);
+      io.emit("order_status_updated", populatedOrder);
     }
 
-    res.json({
+    return res.json({
       message: "¡Felicidades! Has tomado la solicitud.",
-      order,
+      order: populatedOrder,
     });
   } catch (error) {
-    console.error("Error al tomar servicio:", error);
-    res.status(500).json({ message: "Error al procesar la asignación." });
+    console.error("❌ Error grave al tomar servicio:", error);
+    return res.status(500).json({
+      message: "Error al procesar la asignación.",
+      error: error.message,
+    });
   }
 };
 
-// 5. Actualizar estado del pedido (at_store, on_the_way, completed, cancelled)
+// ==========================================
+// 5. ACTUALIZAR ESTADO DEL PEDIDO
+// ==========================================
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    // 🟢 Si el body no especifica status, asumimos "completed" por venir del endpoint /complete
     const status = req.body.status || "completed";
     const { pin } = req.body;
-    const driverId = req.user?._id || req.body.driverId;
 
-    const validStatuses = ["at_store", "on_the_way", "completed", "cancelled"];
+    const validStatuses = [
+      "created",
+      "pending_driver",
+      "assigned",
+      "at_store",
+      "on_the_way",
+      "en_camino",
+      "in_progress",
+      "completed",
+      "cancelled",
+    ];
+
     if (!validStatuses.includes(status)) {
-      return res.status(400).json({ message: "Estado de servicio no válido." });
+      return res.status(400).json({ message: `Estado no válido: ${status}` });
     }
 
-    const order = await Order.findById(orderId).populate(
-      "driver",
-      "name phone vehicleType vehiclePlate",
-    );
+    const order = await Order.findById(orderId)
+      .populate("store", "name address phone originCoords")
+      .populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      )
+      .populate("driver", DRIVER_POPULATE_FIELDS);
 
     if (!order) {
       return res.status(404).json({
@@ -196,13 +381,7 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
-    if (order.driver && order.driver._id.toString() !== driverId?.toString()) {
-      return res.status(403).json({
-        message: "No tienes permiso para actualizar esta solicitud.",
-      });
-    }
-
-    // 🟢 Detección ampliada para eximir del PIN a cualquier tipo de carrera
+    // Eximir del PIN a carreras de tipo transporte
     const isRide =
       order.serviceType === "ride" ||
       order.serviceType === "carrerita" ||
@@ -250,7 +429,9 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// 6. Enviar Contraoferta al Cliente
+// ==========================================
+// 6. ENVIAR CONTRAOFERTA AL CLIENTE
+// ==========================================
 export const sendCounterOffer = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -272,8 +453,12 @@ export const sendCounterOffer = async (req, res) => {
       { $push: { counterOffers: newOffer } },
       { new: true },
     )
-      .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType vehiclePlate");
+      .populate("store", "name address phone originCoords")
+      .populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      )
+      .populate("driver", DRIVER_POPULATE_FIELDS);
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
@@ -300,7 +485,9 @@ export const sendCounterOffer = async (req, res) => {
   }
 };
 
-// 7. Cancelación explícita
+// ==========================================
+// 7. CANCELACIÓN EXPLÍCITA
+// ==========================================
 export const cancelOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -310,8 +497,12 @@ export const cancelOrder = async (req, res) => {
       { status: "cancelled" },
       { new: true },
     )
-      .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType vehiclePlate");
+      .populate("store", "name address phone originCoords")
+      .populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      )
+      .populate("driver", DRIVER_POPULATE_FIELDS);
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
@@ -337,7 +528,9 @@ export const cancelOrder = async (req, res) => {
   }
 };
 
-// 8. Calificar el servicio
+// ==========================================
+// 8. CALIFICAR EL SERVICIO
+// ==========================================
 export const rateOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -367,10 +560,23 @@ export const rateOrder = async (req, res) => {
   }
 };
 
-// 9. Obtener la carrera activa de un domiciliario
+// ==========================================
+// 9. OBTENER LA CARRERA ACTIVA DE UN DOMICILIARIO
+// ==========================================
 export const getActiveDriverOrder = async (req, res) => {
   try {
     const driverId = req.params.driverId || req.user?._id;
+
+    if (!driverId || driverId === "undefined" || driverId === "null") {
+      return res.status(200).json(null);
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(driverId)) {
+      console.warn(
+        `⚠️ driverId no válido recibido en getActiveDriverOrder: ${driverId}`,
+      );
+      return res.status(200).json(null);
+    }
 
     const activeOrder = await Order.findOne({
       driver: driverId,
@@ -385,38 +591,73 @@ export const getActiveDriverOrder = async (req, res) => {
         ],
       },
     })
-      .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType vehiclePlate");
+      .populate("store", "name address phone originCoords")
+      .populate("driver", DRIVER_POPULATE_FIELDS);
 
-    // 🟢 CORRECCIÓN: Responder directamente el objeto de la orden (o null) sin envolverlo en { activeOrder }
-    res.json(activeOrder || null);
+    if (!activeOrder) {
+      return res.status(200).json(null);
+    }
+
+    let populatedOrder = activeOrder.toObject();
+    if (
+      activeOrder.customer &&
+      mongoose.Types.ObjectId.isValid(activeOrder.customer)
+    ) {
+      await activeOrder.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+      populatedOrder = activeOrder.toObject();
+    }
+
+    return res.status(200).json(populatedOrder);
   } catch (error) {
-    console.error("Error al obtener la carrera activa:", error);
-    res.status(500).json({ message: "Error al consultar la carrera activa." });
+    console.error("❌ Error al obtener la carrera activa:", error);
+    return res.status(200).json(null);
   }
 };
 
-// 10. Obtener los detalles / estado de un pedido por ID
+// ==========================================
+// 10. OBTENER LOS DETALLES DE UN PEDIDO POR ID
+// ==========================================
 export const getOrderById = async (req, res) => {
   try {
     const { orderId } = req.params;
 
+    if (!orderId || !mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({ message: "ID de orden no válido." });
+    }
+
     const order = await Order.findById(orderId)
-      .populate("store", "name address phone")
-      .populate("driver", "name phone vehicleType vehiclePlate");
+      .populate("store", "name address phone originCoords")
+      .populate("driver", DRIVER_POPULATE_FIELDS);
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
     }
 
-    res.json(order);
+    let populatedOrder = order.toObject();
+    if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+      await order.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+      populatedOrder = order.toObject();
+    }
+
+    res.json(populatedOrder);
   } catch (error) {
     console.error("Error al obtener la orden por ID:", error);
-    res.status(500).json({ message: "Error interno al consultar la orden." });
+    res.status(500).json({
+      message: "Error interno al consultar la orden.",
+      error: error.message,
+    });
   }
 };
 
-// 11. Actualizar la ubicación GPS en vivo del mototaxista
+// ==========================================
+// 11. ACTUALIZAR UBICACIÓN GPS EN VIVO DEL CONDUCTOR
+// ==========================================
 export const updateDriverLocation = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -468,11 +709,14 @@ export const updateDriverLocation = async (req, res) => {
     res.status(500).json({ message: "Error al actualizar la ubicación GPS." });
   }
 };
-// 12. Responder a una Contraoferta (Cliente Acepta o Rechaza)
+
+// ==========================================
+// 12. RESPONDER A UNA CONTRAOFERTA
+// ==========================================
 export const respondCounterOffer = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { action, driverId, proposedPrice } = req.body; // action: "accept" o "reject"
+    const { action, driverId, proposedPrice } = req.body;
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -480,13 +724,11 @@ export const respondCounterOffer = async (req, res) => {
     }
 
     if (action === "accept") {
-      // Actualizar el costo de envío, total, asignar conductor y cambiar estado
       order.deliveryFee = Number(proposedPrice);
       order.total = (order.subtotal || 0) + Number(proposedPrice);
       order.driver = driverId;
-      order.status = "assigned";
+      order.status = "on_the_way"; // Pasa directo a en camino
 
-      // Marcar la contraoferta como aceptada en el historial
       if (order.counterOffers && order.counterOffers.length > 0) {
         order.counterOffers = order.counterOffers.map((offer) => {
           if (offer.driverId?.toString() === driverId?.toString()) {
@@ -499,8 +741,12 @@ export const respondCounterOffer = async (req, res) => {
       await order.save();
 
       const populatedOrder = await Order.findById(order._id)
-        .populate("store", "name address phone")
-        .populate("driver", "name phone vehicleType vehiclePlate");
+        .populate("store", "name address phone originCoords")
+        .populate(
+          "customer",
+          "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+        )
+        .populate("driver", DRIVER_POPULATE_FIELDS);
 
       const io = req.app.get("io");
       if (io) {
@@ -519,7 +765,6 @@ export const respondCounterOffer = async (req, res) => {
         order: populatedOrder,
       });
     } else if (action === "reject") {
-      // Marcar como rechazada
       if (order.counterOffers && order.counterOffers.length > 0) {
         order.counterOffers = order.counterOffers.map((offer) => {
           if (offer.driverId?.toString() === driverId?.toString()) {
