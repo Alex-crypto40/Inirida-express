@@ -50,7 +50,7 @@ export default function OrderStatusWidget({
     }
   }, [initialOrder]);
 
-  // Recuperación de orden activa al recargar
+  // Recuperación de orden activa al recargar la página
   useEffect(() => {
     if (activeOrder && activeOrder._id) return;
 
@@ -131,8 +131,6 @@ export default function OrderStatusWidget({
             return null;
           }
 
-          // NOTA: Cuando es 'completed', NO limpiamos localStorage ni volvemos null aquí,
-          // para permitir que se muestre el panel de calificación del servicio.
           return nextState;
         });
       }
@@ -204,7 +202,7 @@ export default function OrderStatusWidget({
 
   const isRide = checkIsRide(activeOrder);
 
-  // Lógica de datos de la carrera
+  // Lógica de contraofertas
   const counterOffers = activeOrder.counterOffers || [];
   const activeCounterOffer =
     counterOffers.length > 0
@@ -245,28 +243,45 @@ export default function OrderStatusWidget({
 
   const isCompleted = status === "completed";
 
-  const driver =
-    activeOrder.driverId || activeOrder.driver || activeOrder.assignedDriver;
+  // OBTENCIÓN ROBUSTA DE CONDUCTOR Y VEHÍCULO BASADA EN TU MODELO DE BASE DE DATOS
+  const driverObj =
+    typeof activeOrder.driver === "object"
+      ? activeOrder.driver
+      : typeof activeOrder.assignedDriver === "object"
+        ? activeOrder.assignedDriver
+        : typeof activeOrder.driverId === "object"
+          ? activeOrder.driverId
+          : {};
 
-  // AJUSTE REALIZADO: Búsqueda exhaustiva de la placa y tipo de vehículo en diferentes posibles ubicaciones del backend
+  const displayDriverName =
+    activeOrder.driverName ||
+    driverObj?.name ||
+    driverObj?.fullName ||
+    activeCounterOffer?.driverName ||
+    "Conductor Asignado";
+
+  // En la DB del conductor la propiedad exacta es vehiclePlate
   const displayPlate =
-    driver?.plateNumber ||
-    driver?.plate ||
-    driver?.placa ||
-    driver?.vehiclePlate ||
-    driver?.vehicle?.plate ||
-    driver?.vehicle?.placa ||
-    driver?.vehicle?.plateNumber ||
+    driverObj?.vehiclePlate ||
+    driverObj?.plateNumber ||
+    driverObj?.plate ||
+    driverObj?.placa ||
+    driverObj?.vehicle?.vehiclePlate ||
+    driverObj?.vehicle?.plate ||
     activeOrder?.vehiclePlate ||
+    activeOrder?.plateNumber ||
+    activeOrder?.driverVehiclePlate ||
     activeOrder?.plate ||
     activeOrder?.placa ||
     "Sin placa";
 
+  // En la DB del conductor la propiedad exacta es vehicleType
   const displayVehicleType =
-    driver?.vehicleType ||
-    driver?.vehicle?.type ||
-    driver?.vehicle?.vehicleType ||
+    driverObj?.vehicleType ||
+    driverObj?.vehicle?.vehicleType ||
+    driverObj?.vehicle?.type ||
     activeOrder?.vehicleType ||
+    activeOrder?.driverVehicleType ||
     "Motocarro";
 
   const pinCode = activeOrder.deliveryPin || activeOrder.pinCode;
@@ -279,8 +294,31 @@ export default function OrderStatusWidget({
   const customerName =
     activeOrder.customer?.name || activeOrder.customerName || "Cliente";
 
-  const origenAddress = activeOrder.customer?.address || "Ubicación cliente";
-  const destinoNotes = activeOrder.customer?.notes || "";
+  // Origen y Destino
+  const origenAddress =
+    activeOrder.origen ||
+    activeOrder.origenName ||
+    activeOrder.address ||
+    activeOrder.pickupAddress ||
+    activeOrder.pickup ||
+    activeOrder.from ||
+    activeOrder.customer?.address ||
+    "Ubicación cliente";
+
+  const destinoAddress =
+    activeOrder.destino ||
+    activeOrder.destinoName ||
+    activeOrder.destination ||
+    activeOrder.destinationAddress ||
+    activeOrder.deliveryAddress ||
+    activeOrder.dropoff ||
+    activeOrder.dropoffAddress ||
+    activeOrder.to ||
+    (typeof activeOrder.destination === "object"
+      ? activeOrder.destination?.address || activeOrder.destination?.name
+      : null) ||
+    activeOrder.customer?.notes ||
+    "Sin especificar";
 
   // Handlers
   const handleCancelOrder = async () => {
@@ -367,7 +405,6 @@ export default function OrderStatusWidget({
     }
   };
 
-  // HANDLER PARA CALIFICACIÓN
   const handleRateDriver = async () => {
     setLoadingAction(true);
     try {
@@ -399,15 +436,14 @@ export default function OrderStatusWidget({
   return (
     <>
       <div
-        className="position-fixed bottom-0 start-50 translate-middle-x mb-4 p-3.5 bg-white shadow-2xl rounded-3xl border border-orange-300 flex flex-col justify-between"
+        className="fixed bottom-4 left-1/2 -translate-x-1/2 p-4 bg-white shadow-2xl rounded-3xl border border-orange-300 flex flex-col justify-between z-50"
         style={{
-          zIndex: 1040,
           maxWidth: "390px",
           width: "92%",
           boxShadow: "0 12px 30px -5px rgba(234, 88, 12, 0.25)",
         }}
       >
-        <div className="d-flex justify-content-between align-items-center mb-2.5 pb-2 border-b border-gray-100">
+        <div className="flex justify-between items-center mb-2.5 pb-2 border-b border-gray-100">
           <h6 className="m-0 font-extrabold text-sm text-gray-800 flex items-center gap-2">
             <span className="p-1 bg-orange-100 rounded-lg">🛺</span> Estado de
             tu Carrera
@@ -430,19 +466,18 @@ export default function OrderStatusWidget({
           </span>
         </div>
 
-        {/* Detalle de ruta */}
+        {/* Detalle de ruta (Origen y Destino) */}
         {!isCompleted && (
-          <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1 text-xs">
+          <div className="bg-gray-50 p-2.5 rounded-xl border border-gray-200 mb-2 space-y-1.5 text-xs">
             <div className="flex items-center gap-1.5 text-gray-700">
               <span className="text-green-600 font-bold">📍 Origen:</span>
               <span className="truncate font-medium">{origenAddress}</span>
             </div>
-            {destinoNotes && (
-              <div className="flex items-center gap-1.5 text-gray-700">
-                <span className="text-orange-600 font-bold">🏁 Detalle:</span>
-                <span className="truncate font-medium">{destinoNotes}</span>
-              </div>
-            )}
+
+            <div className="flex items-center gap-1.5 text-gray-700 border-t border-gray-200/80 pt-1">
+              <span className="text-orange-600 font-bold">🏁 Destino:</span>
+              <span className="truncate font-medium">{destinoAddress}</span>
+            </div>
           </div>
         )}
 
@@ -452,7 +487,7 @@ export default function OrderStatusWidget({
             <p className="text-xs text-orange-950 font-bold mb-1">
               💬 Un motocarro te propone una tarifa:
             </p>
-            <div className="d-flex justify-content-center align-items-baseline gap-1 my-1">
+            <div className="flex justify-center items-baseline gap-1 my-1">
               <span className="text-2xl font-black text-orange-600">
                 ${activeCounterOffer.proposedPrice?.toLocaleString()} COP
               </span>
@@ -464,19 +499,18 @@ export default function OrderStatusWidget({
               </strong>
             </p>
 
-            <div className="d-flex gap-2">
+            <div className="flex gap-2">
               <button
                 disabled={loadingAction}
                 onClick={handleRejectCounterOffer}
-                className="btn btn-outline-danger btn-sm w-50 rounded-xl font-bold text-xs py-2"
+                className="w-1/2 py-2 border border-red-500 text-red-600 hover:bg-red-50 rounded-xl font-bold text-xs"
               >
                 Rechazar ❌
               </button>
               <button
                 disabled={loadingAction}
                 onClick={handleAcceptCounterOffer}
-                className="btn btn-success btn-sm w-50 rounded-xl font-bold text-xs py-2 shadow-sm text-white"
-                style={{ backgroundColor: "#16a34a", borderColor: "#15803d" }}
+                className="w-1/2 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs shadow-sm"
               >
                 {loadingAction ? "Aceptando..." : "Aceptar Oferta 🤝"}
               </button>
@@ -511,7 +545,6 @@ export default function OrderStatusWidget({
         {/* Conductor en camino */}
         {isAccepted && (
           <div className="space-y-2.5 mt-1">
-            {/* MOSTRAR PIN SOLO SI NO ES UNA CARRERA */}
             {!isRide && pinCode && (
               <div className="bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-xl p-2.5 text-center shadow-sm">
                 <span className="text-[10px] font-bold uppercase tracking-wider block opacity-90">
@@ -527,21 +560,21 @@ export default function OrderStatusWidget({
             )}
 
             <div className="bg-gradient-to-br from-gray-50 to-orange-50/30 p-2.5 rounded-2xl border border-orange-100 text-xs space-y-1.5 shadow-xs">
-              <div className="d-flex justify-content-between align-items-center">
+              <div className="flex justify-between items-center">
                 <span className="text-gray-500 font-medium">👤 Conductor:</span>
                 <strong className="text-gray-900 font-bold text-sm">
-                  {driver?.name || driver?.fullName || "Asignado"}
+                  {displayDriverName}
                 </strong>
               </div>
-              <div className="d-flex justify-content-between align-items-center">
+              <div className="flex justify-between items-center">
                 <span className="text-gray-500 font-medium">🛵 Vehículo:</span>
                 <span className="font-bold text-gray-700 capitalize">
                   {displayVehicleType}
                 </span>
               </div>
-              <div className="d-flex justify-content-between align-items-center">
+              <div className="flex justify-between items-center">
                 <span className="text-gray-500 font-medium">💳 Placa:</span>
-                <span className="badge bg-dark text-white px-2 py-1 font-mono rounded-lg tracking-wider">
+                <span className="bg-gray-900 text-white px-2 py-1 font-mono rounded-lg tracking-wider text-[11px] font-bold">
                   {displayPlate}
                 </span>
               </div>
@@ -591,7 +624,7 @@ export default function OrderStatusWidget({
                 </p>
                 <p className="text-[11px] text-gray-600 m-0">
                   ¿Cómo estuvo tu servicio con{" "}
-                  <strong>{driver?.name || "el conductor"}</strong>?
+                  <strong>{displayDriverName}</strong>?
                 </p>
 
                 {/* Calificación por estrellas */}
@@ -605,7 +638,7 @@ export default function OrderStatusWidget({
                       onMouseLeave={() => setHoverRating(0)}
                       className="text-2xl cursor-pointer transition-transform active:scale-125 border-none bg-transparent"
                     >
-                      {(hoverRating || rating) >= star ? "⭐" : "🌟"}
+                      {(hoverRating || rating) >= star ? "⭐" : "☆"}
                     </button>
                   ))}
                 </div>

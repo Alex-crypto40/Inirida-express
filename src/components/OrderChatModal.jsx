@@ -76,7 +76,7 @@ const OrderChatModal = ({
 
     // 2. Conexión Socket.io optimizada para Render
     socketRef.current = io(BASE_URL, {
-      transports: ["websocket", "polling"], // Intentar websocket primero
+      transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionAttempts: 15,
       reconnectionDelay: 1000,
@@ -87,8 +87,8 @@ const OrderChatModal = ({
     const joinRoom = () => {
       if (socketRef.current) {
         setIsConnected(true);
+        // Unirse únicamente a una sala para evitar transmisiones dobles
         socketRef.current.emit("join_order", orderId);
-        socketRef.current.emit("join", orderId); // Fallback room name
       }
     };
 
@@ -109,20 +109,22 @@ const OrderChatModal = ({
 
     socketRef.current.io.on("reconnect", joinRoom);
 
-    // Manejador único de mensajes entrantes
+    // Manejador único de mensajes entrantes con deduplicación estricta
     const handleReceiveMessage = (newMessage) => {
       setMessages((prev) => {
         const isDuplicate = prev.some((m) => {
+          // 1. Coincidencia por ID real o temporal
           if (m._id && newMessage._id && m._id === newMessage._id) return true;
+          if (m.tempId && newMessage.tempId && m.tempId === newMessage.tempId)
+            return true;
+
+          // 2. Coincidencia por contenido y emisor
           const sameText = m.text === newMessage.text;
           const sameRole =
             (m.senderRole || m.senderType) ===
             (newMessage.senderRole || newMessage.senderType);
-          const timeDiff = Math.abs(
-            new Date(m.createdAt || Date.now()) -
-              new Date(newMessage.createdAt || Date.now()),
-          );
-          return sameText && sameRole && timeDiff < 2000;
+
+          return sameText && sameRole;
         });
 
         if (isDuplicate) return prev;
@@ -130,7 +132,10 @@ const OrderChatModal = ({
       });
     };
 
-    // Escuchar eventos estándar de Socket
+    // Apagar listeners viejos antes de encender (evita multiplicación acumulativa)
+    socketRef.current.off("receive_message", handleReceiveMessage);
+    socketRef.current.off("newMessage", handleReceiveMessage);
+
     socketRef.current.on("receive_message", handleReceiveMessage);
     socketRef.current.on("newMessage", handleReceiveMessage);
 
@@ -161,6 +166,7 @@ const OrderChatModal = ({
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const messageData = {
       _id: tempId,
+      tempId,
       orderId,
       senderRole: role,
       senderType: role,
@@ -169,7 +175,7 @@ const OrderChatModal = ({
       createdAt: new Date().toISOString(),
     };
 
-    // Actualización optimista en UI
+    // Renderizado optimista
     setMessages((prev) => [...prev, messageData]);
     setText("");
 
@@ -178,14 +184,7 @@ const OrderChatModal = ({
     // Intentar envío vía Socket
     if (socketRef.current && socketRef.current.connected) {
       try {
-        socketRef.current.emit("send_message", {
-          orderId,
-          senderRole: role,
-          senderType: role,
-          senderName: name,
-          text: cleanText,
-          createdAt: messageData.createdAt,
-        });
+        socketRef.current.emit("send_message", messageData);
         sentViaSocket = true;
       } catch (err) {
         console.warn(
@@ -195,13 +194,14 @@ const OrderChatModal = ({
       }
     }
 
-    // Respando vía HTTP POST si Socket falló o está desconectado
+    // Respaldo vía HTTP POST
     if (!sentViaSocket) {
       try {
         await fetch(`${BASE_URL}/api/orders/${orderId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            tempId,
             senderRole: role,
             senderType: role,
             senderName: name,
@@ -244,19 +244,20 @@ const OrderChatModal = ({
 
   return (
     <div
-      className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3"
       style={{ zIndex: 1060 }}
       onClick={onClose}
     >
+      {/* Dimensiones compactas para evitar modal desproporcionado */}
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md h-[550px] flex flex-col overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-sm h-[520px] max-h-[85vh] flex flex-col overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Encabezado */}
-        <div className="bg-orange-500 text-white p-4 flex justify-between items-center shadow-md">
+        <div className="bg-orange-500 text-white p-3.5 flex justify-between items-center shadow-md shrink-0">
           <div>
-            <h3 className="font-bold text-lg flex items-center gap-2">
-              💬 Chat del Pedido
+            <h3 className="font-bold text-sm flex items-center gap-1.5">
+              💬 Chat Carrera #{(orderId || "").toString().slice(-4)}
               <span
                 className={`w-2 h-2 rounded-full ${
                   isConnected ? "bg-emerald-400 animate-pulse" : "bg-red-400"
@@ -266,25 +267,25 @@ const OrderChatModal = ({
                 }
               />
             </h3>
-            <p className="text-xs text-orange-100">
+            <p className="text-[11px] text-orange-100">
               {isConnected ? "En línea" : "Modo Respaldo (HTTP)"}
             </p>
           </div>
           <button
             onClick={onClose}
             type="button"
-            className="bg-orange-600 hover:bg-orange-700 text-white w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors cursor-pointer"
+            className="bg-orange-600 hover:bg-orange-700 text-white w-7 h-7 rounded-full flex items-center justify-center font-bold text-xs transition-colors cursor-pointer"
           >
             ✕
           </button>
         </div>
 
         {/* Mensajes */}
-        <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-gray-50">
+        <div className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-gray-50">
           {messages.length === 0 ? (
-            <div className="text-center text-gray-400 text-sm mt-10">
+            <div className="text-center text-gray-400 text-xs mt-12">
               <p>📍 Chat activo entre Cliente y Motocarro.</p>
-              <p className="text-xs mt-1">
+              <p className="text-[11px] mt-1 text-gray-400">
                 Escribe un mensaje para iniciar la conversación.
               </p>
             </div>
@@ -302,24 +303,24 @@ const OrderChatModal = ({
 
               return (
                 <div
-                  key={msg._id || index}
+                  key={msg._id || msg.tempId || index}
                   className={`flex flex-col ${
                     isMe ? "items-end" : "items-start"
                   }`}
                 >
-                  <div className="flex items-center gap-1 mb-1">
+                  <div className="flex items-center gap-1 mb-0.5">
                     <span className="text-[10px] font-bold text-gray-600">
                       {msg.senderName}
                     </span>
                     <span
-                      className={`text-[9px] px-1.5 py-0.5 rounded-full font-semibold ${badge.bg}`}
+                      className={`text-[8px] px-1.5 py-0.2 rounded-full font-semibold ${badge.bg}`}
                     >
                       {badge.label}
                     </span>
                   </div>
 
                   <div
-                    className={`max-w-[80%] p-3 rounded-2xl text-sm shadow-xs relative ${
+                    className={`max-w-[85%] px-3 py-2 rounded-2xl text-xs shadow-xs relative ${
                       isMe
                         ? "bg-orange-500 text-white rounded-tr-none"
                         : "bg-white text-gray-800 border border-gray-200 rounded-tl-none"
@@ -329,7 +330,7 @@ const OrderChatModal = ({
                       {msg.text}
                     </div>
                     <span
-                      className={`block text-[9px] mt-1 text-right ${
+                      className={`block text-[8px] mt-0.5 text-right ${
                         isMe ? "text-orange-200" : "text-gray-400"
                       }`}
                     >
@@ -343,21 +344,22 @@ const OrderChatModal = ({
           <div ref={chatBottomRef} />
         </div>
 
-        {/* Input */}
+        {/* Input Form */}
         <form
           onSubmit={handleSendMessage}
-          className="p-3 bg-white border-t border-gray-100 flex gap-2"
+          className="p-2.5 bg-white border-t border-gray-100 flex gap-2 shrink-0"
         >
           <input
             type="text"
             placeholder="Escribe un mensaje..."
             value={text}
             onChange={(e) => setText(e.target.value)}
-            className="flex-1 border border-gray-300 rounded-xl px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium text-slate-800"
+            className="flex-1 border border-gray-300 rounded-xl px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-orange-500 font-medium text-slate-800"
           />
           <button
             type="submit"
-            className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-4 py-2 rounded-xl text-sm transition-colors flex items-center gap-1 cursor-pointer"
+            disabled={!text.trim()}
+            className="bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white font-bold px-3 py-2 rounded-xl text-xs transition-colors flex items-center gap-1 cursor-pointer"
           >
             Enviar 🚀
           </button>

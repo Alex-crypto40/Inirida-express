@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Routes, Route, Link } from "react-router-dom";
+import { Routes, Route, Link, useNavigate } from "react-router-dom";
 import { io } from "socket.io-client";
 
 // Estilos CSS indispensables de Leaflet
@@ -27,18 +27,12 @@ import RegisterStore from "./views/RegisterStore";
 import DriverDashboard from "./views/DriverDashboard";
 import DriverLogin from "./views/DriverLogin";
 
-// URL de tu servidor backend en Render o localhost
 const SOCKET_URL =
   import.meta.env.VITE_SOCKET_URL ||
   (window.location.hostname === "localhost"
     ? "http://localhost:5000"
     : "https://inirida-express.onrender.com");
 
-const socket = io(SOCKET_URL, {
-  transports: ["polling", "websocket"],
-});
-
-// Vista para la convocatoria de domiciliarios
 function Repartidores() {
   return (
     <div className="min-h-[70vh] flex flex-col justify-center items-center p-6 text-center">
@@ -51,7 +45,6 @@ function Repartidores() {
         llevando los mejores platos de la ciudad.
       </p>
 
-      {/* Botón hacia el Formulario de Registro / Login */}
       <Link to="/driver-login" className="mt-6">
         <button className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-6 py-3 rounded-xl shadow-md transition-all">
           Ingresar / Registrarme 🛵
@@ -64,8 +57,17 @@ function Repartidores() {
 function App() {
   const [socket, setSocket] = useState(null);
 
+  // Estado del conductor autenticado (recuperado de localStorage al iniciar/recargar)
+  const [driver, setDriver] = useState(() => {
+    try {
+      const savedDriver = localStorage.getItem("current_driver");
+      return savedDriver ? JSON.parse(savedDriver) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
   useEffect(() => {
-    // Inicializar la conexión de WebSockets de forma global
     const newSocket = io(SOCKET_URL, {
       transports: ["polling", "websocket"],
       withCredentials: true,
@@ -78,20 +80,35 @@ function App() {
     };
   }, []);
 
+  const handleLogout = () => {
+    localStorage.removeItem("current_driver");
+    setDriver(null);
+    window.location.href = "/driver-login";
+  };
+
   return (
     <CartProvider>
       <div className="bg-gray-50 min-h-screen flex flex-col w-full">
         <main className="max-w-md w-full mx-auto flex-1 overflow-x-hidden">
-          {/* Intercambio de pantallas pasando la instancia de socket */}
           <Routes>
             <Route path="/" element={<Home socket={socket} />} />
             <Route path="/login" element={<Login />} />
             <Route path="/unete-repartidor" element={<Repartidores />} />
             <Route path="/store/:id" element={<StoreDetail />} />
-            <Route path="/driver-login" element={<DriverLogin />} />
+            <Route
+              path="/driver-login"
+              element={<DriverLogin setDriver={setDriver} />}
+            />
             <Route
               path="/driver"
-              element={<DriverDashboard socket={socket} />}
+              element={
+                <DriverDashboard
+                  socket={socket}
+                  driverId={driver?._id || driver?.id}
+                  driverName={driver?.name || driver?.nombre}
+                  onLogout={handleLogout}
+                />
+              }
             />
             <Route path="/admin/:storeId" element={<AdminStore />} />
             <Route path="/register-store" element={<RegisterStore />} />

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom";
 const RAW_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
 const API_URL = RAW_URL.replace(/\/+$/, "");
 
-export default function DriverLogin() {
+export default function DriverLogin({ setDriver }) {
   const [isRegister, setIsRegister] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
@@ -95,13 +95,23 @@ export default function DriverLogin() {
           const driverId = driverData._id || driverData.id || data.driverId;
 
           if (driverId) {
-            // Guardar en localStorage
+            // Guardar en localStorage para compatibilidad
             localStorage.setItem("driverId", driverId);
             localStorage.setItem("driverInfo", JSON.stringify(driverData));
             localStorage.setItem("driverData", JSON.stringify(driverData));
+
+            // Clave clave para mantener la sesión en App.jsx tras recargas
+            localStorage.setItem("current_driver", JSON.stringify(driverData));
+
             if (data.token) {
               localStorage.setItem("token", data.token);
             }
+
+            // Actualizar el estado global en App.jsx si la prop fue enviada
+            if (setDriver) {
+              setDriver(driverData);
+            }
+
             navigate("/driver");
           } else {
             alert(

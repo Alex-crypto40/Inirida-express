@@ -66,7 +66,7 @@ const io = new Server(server, {
     methods: ["GET", "POST"],
     credentials: true,
   },
-  transports: ["websocket", "polling"], // Prioridad WebSocket para evitar bloqueos HTTP 400 en Render
+  transports: ["websocket", "polling"],
   pingTimeout: 90000,
   pingInterval: 25000,
   connectTimeout: 45000,
@@ -111,6 +111,7 @@ io.on("connection", (socket) => {
       phone,
       vehicleType,
       vehiclePlate,
+      plate,
       lat,
       lng,
       isAvailable,
@@ -118,7 +119,6 @@ io.on("connection", (socket) => {
       speed,
     } = data;
 
-    // Validación básica de datos obligatorios
     if (!driverId || lat === undefined || lng === undefined) return;
 
     if (isAvailable !== false) {
@@ -127,7 +127,7 @@ io.on("connection", (socket) => {
         driverName: driverName || "Motocarro Express",
         phone: phone || "",
         vehicleType: vehicleType || "motocarro",
-        vehiclePlate: vehiclePlate || "",
+        vehiclePlate: vehiclePlate || plate || "",
         lat: Number(lat),
         lng: Number(lng),
         heading: heading ? Number(heading) : 0,
@@ -137,10 +137,8 @@ io.on("connection", (socket) => {
         updatedAt: new Date(),
       };
 
-      // Guardar o actualizar en el Map en memoria
       activeDriversLocations.set(driverId, driverInfo);
 
-      // 📡 Emisión a clientes
       io.emit("driver_location_changed", driverInfo);
       io.emit("driver_location_updated", driverInfo);
       io.emit(
@@ -148,7 +146,6 @@ io.on("connection", (socket) => {
         Array.from(activeDriversLocations.values()),
       );
     } else {
-      // Si el conductor se puso Ocupado o Desconectado
       activeDriversLocations.delete(driverId);
       io.emit("driver_disconnected_location", { driverId });
       io.emit(
@@ -235,7 +232,6 @@ io.on("connection", (socket) => {
       });
       await newMessage.save();
 
-      // Emitir a la sala en todos los alias soportados
       io.to(cleanOrderId)
         .to(`order_${cleanOrderId}`)
         .emit("receive_message", newMessage);
@@ -308,7 +304,6 @@ app.get(/^(?!\/socket\.io\/).*/, (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-// Inicializamos base de datos y servidor
 const startServer = async () => {
   try {
     await connectDB();

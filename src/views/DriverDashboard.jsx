@@ -1,214 +1,91 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
+  Power,
+  X,
+  Clock,
+  RefreshCw,
   MapPin,
   Navigation,
   CheckCircle,
-  Phone,
   MessageSquare,
-  X,
   Send,
-  Power,
-  RefreshCw,
-  Clock,
-  ExternalLink,
-  Volume2,
-  ChevronDown,
-  ChevronUp,
+  Wifi,
+  WifiOff,
+  AlertCircle,
+  ChevronRight,
+  ShieldAlert,
 } from "lucide-react";
-import { io } from "socket.io-client";
+import ActiveOrderCard from "../components/ActiveTripCard";
 
-// ==========================================
-// CONFIGURACIÓN DE URLS Y SOCKETS
-// ==========================================
-const RAW_API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
-const API_BASE = RAW_API_URL.replace(/\/$/, "");
-const SOCKET_URL = API_BASE.replace(/\/api$/, "");
+// ============================================================================
+// CONFIGURACIÓN DE ENDPOINTS
+// ============================================================================
+const API_BASE_URL =
+  import.meta.env.VITE_SOCKET_URL ||
+  (window.location.hostname === "localhost"
+    ? "http://localhost:5000"
+    : "https://inirida-express.onrender.com");
 
-// ==========================================
-// FUNCIONES AUXILIARES GPS Y NAVEGACIÓN
-// ==========================================
-const distance = (lat1, lon1, lat2, lon2) => {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
-  const R = 6371000; // metros
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; // Devuelve metros
-};
+export default function DriverDashboard({
+  driverName = "Conductor",
+  driverId,
+  socket,
+  onLogout,
+}) {
+  // ID de Conductor Validador
+  const validDriverId =
+    driverId && driverId.length === 24 ? driverId : "650000000000000000000001";
 
-const smoothPosition = (prevPos, newPos) => {
-  if (!prevPos) return newPos;
-  // Factor de suavizado (0.3 peso nuevo, 0.7 peso anterior)
-  return {
-    lat: prevPos.lat + (newPos.lat - prevPos.lat) * 0.3,
-    lng: prevPos.lng + (newPos.lng - prevPos.lng) * 0.3,
-  };
-};
+  // --------------------------------------------------------------------------
+  // ESTADOS GENERALES Y GPS
+  // --------------------------------------------------------------------------
+  const [isOnline, setIsOnline] = useState(true);
+  const [currentCoords, setCurrentCoords] = useState(null);
+  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-const getDynamicInterval = (speed) => {
-  // Ajusta la frecuencia de envío del GPS según la velocidad (km/h)
-  if (!speed || speed < 2) return 5000; // Detenido: cada 5s
-  if (speed < 15) return 3000; // Desplazamiento lento: cada 3s
-  return 1500; // En movimiento rápido: cada 1.5s
-};
-
-export default function DriverDashboard({ driver, onLogout }) {
-  // ==========================================
-  // 1. OBTENCIÓN DE DATOS DEL CONDUCTOR
-  // ==========================================
-  const getSavedDriver = () => {
+  // --------------------------------------------------------------------------
+  // ESTADOS DE ÓRDENES Y UI (Persistencia inicial desde localStorage)
+  // --------------------------------------------------------------------------
+  const [availableOrders, setAvailableOrders] = useState([]);
+  const [activeOrders, setActiveOrders] = useState(() => {
     try {
-      const item = localStorage.getItem("driverData");
-      return item ? JSON.parse(item) : null;
+      const saved = localStorage.getItem(`activeOrders_${validDriverId}`);
+      return saved ? JSON.parse(saved) : [];
     } catch (e) {
-      console.error("Error al leer driverData de localStorage", e);
-      return null;
-    }
-  };
-
-  const savedDriverData = getSavedDriver();
-  const driverId =
-    driver?.id ||
-    driver?._id ||
-    savedDriverData?.id ||
-    savedDriverData?._id ||
-    "DRV-123";
-  const driverName =
-    driver?.name || savedDriverData?.name || "Conductor Motocarro";
-
-  // ==========================================
-  // 2. ESTADOS PRINCIPALES
-  // ==========================================
-  const [isOnline, setIsOnline] = useState(() => {
-    try {
-      const savedStatus = localStorage.getItem(`driver_is_online_${driverId}`);
-      return savedStatus ? JSON.parse(savedStatus) : false;
-    } catch (e) {
-      return false;
+      console.error("Error leyendo activeOrders de localStorage:", e);
+      return [];
     }
   });
 
-  const [availableOrders, setAvailableOrders] = useState([]);
-  const [activeOrder, setActiveOrder] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [geoError, setGeoError] = useState(null);
-  const [isMinimized, setIsMinimized] = useState(false); // 🟢 Estado para colapsar/minimizar la tarjeta flotante
-
-  // Guardar estado en línea
+  // Guardar en localStorage cada vez que activeOrders cambie
   useEffect(() => {
     try {
       localStorage.setItem(
-        `driver_is_online_${driverId}`,
-        JSON.stringify(isOnline),
+        `activeOrders_${validDriverId}`,
+        JSON.stringify(activeOrders),
       );
     } catch (e) {
-      console.error("Error guardando el estado en línea", e);
+      console.error("Error guardando activeOrders en localStorage:", e);
     }
-  }, [isOnline, driverId]);
+  }, [activeOrders, validDriverId]);
 
-  // GPS y Chat
-  const [currentCoords, setCurrentCoords] = useState(null);
-  const [gpsAccuracy, setGpsAccuracy] = useState(null);
+  // --------------------------------------------------------------------------
+  // ESTADOS Y REFERENCIAS DEL CHAT EN VIVO
+  // --------------------------------------------------------------------------
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatTargetOrder, setChatTargetOrder] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessageText, setNewMessageText] = useState("");
-
-  // Referencias declaradas correctamente
-  const socketRef = useRef(null);
-  const watchIdRef = useRef(null);
-  const queueRef = useRef([]); // Buffer offline
   const chatEndRef = useRef(null);
 
-  useEffect(() => {
-    if (isChatOpen && chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [chatMessages, isChatOpen]);
-
-  // ==========================================
-  // HELPER PARA EXTRAER ORIGEN Y DESTINO ROBUSTO DESDE items[0] O LA RAÍZ
-  // ==========================================
-  const getOrigin = (ord) => {
-    if (!ord) return "Origen no especificado";
-    const item = ord?.items?.[0] || {};
-    const r = ord.rideDetails || ord;
-    return (
-      item.origen ||
-      item.origin ||
-      item.pickupAddress ||
-      item.originAddress ||
-      r.origen ||
-      r.pickupAddress ||
-      r.originAddress ||
-      r.originText ||
-      r.pickup ||
-      (typeof r.origin === "string" ? r.origin : r.origin?.address) ||
-      "Origen no especificado"
-    );
-  };
-
-  const getDestination = (ord) => {
-    if (!ord) return "Destino no especificado";
-    const item = ord?.items?.[0] || {};
-    const r = ord.rideDetails || ord;
-    return (
-      item.detalle ||
-      item.destino ||
-      item.destination ||
-      item.dropoffAddress ||
-      item.description ||
-      r.detalle ||
-      r.destino ||
-      r.destinationAddress ||
-      r.dropoffAddress ||
-      r.destinationText ||
-      r.detail ||
-      r.dropoff ||
-      (typeof r.destination === "string"
-        ? r.destination
-        : r.destination?.address) ||
-      "Destino no especificado"
-    );
-  };
-
-  // ==========================================
-  // 3. REPRODUCIR SONIDO DE ALERTA
-  // ==========================================
-  const playAlertSound = () => {
-    try {
-      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
-      osc.frequency.exponentialRampToValueAtTime(
-        880,
-        audioCtx.currentTime + 0.3,
-      );
-      gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.3);
-    } catch (e) {
-      console.log("No se pudo reproducir el sonido automático:", e);
-    }
-  };
-
-  // ==========================================
-  // 4. CÁLCULO DE DISTANCIA HAVERSINE (En km)
-  // ==========================================
+  // --------------------------------------------------------------------------
+  // FUNCIÓN AUXILIAR: Cálculo de distancia (Haversine)
+  // --------------------------------------------------------------------------
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     if (!lat1 || !lon1 || !lat2 || !lon2) return null;
-    const R = 6371;
+    const R = 6371; // Radio de la tierra en KM
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
     const dLon = ((lon2 - lon1) * Math.PI) / 180;
     const a =
@@ -221,393 +98,481 @@ export default function DriverDashboard({ driver, onLogout }) {
     return (R * c).toFixed(1);
   };
 
-  // ==========================================
-  // 5. CONSULTA DE CARRERAS DISPONIBLES
-  // ==========================================
+  // --------------------------------------------------------------------------
+  // 1. CARGA DE ÓRDENES Y PERSISTENCIA DESDE EL BACKEND
+  // --------------------------------------------------------------------------
   const fetchOrders = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/orders/available`);
+      setLoading(true);
+      setError("");
+
+      // Consultar carreras disponibles
+      const res = await fetch(`${API_BASE_URL}/api/orders/available`);
       if (res.ok) {
         const data = await res.json();
-        const ordersList = Array.isArray(data) ? data : data.orders || [];
-
-        setAvailableOrders((prevOrders) => {
-          if (ordersList.length > prevOrders.length && prevOrders.length > 0) {
-            playAlertSound();
-          }
-          return ordersList;
-        });
+        setAvailableOrders(Array.isArray(data) ? data : data?.orders || []);
+      } else if (res.status === 404) {
+        setAvailableOrders([]);
       }
-    } catch (err) {
-      console.error("Error obteniendo carreras disponibles:", err);
-    }
-  }, []);
 
-  // ==========================================
-  // 6. CONSULTA DE CARRERA ACTIVA
-  // ==========================================
-  const checkActiveOrder = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/orders/driver-active/${driverId}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && (data._id || data.id)) {
-          setActiveOrder(data);
+      // Persistencia Backend: Consultar carreras activas asignadas a este conductor
+      const activeRes = await fetch(
+        `${API_BASE_URL}/api/orders/driver-active/${validDriverId}`,
+      );
+
+      if (activeRes.ok) {
+        const activeData = await activeRes.json();
+
+        // Normalizar respuesta (sea objeto único, arreglo o nulo)
+        let activeList = [];
+        if (Array.isArray(activeData)) {
+          activeList = activeData;
+        } else if (activeData && activeData._id) {
+          activeList = [activeData];
+        } else if (activeData?.orders && Array.isArray(activeData.orders)) {
+          activeList = activeData.orders;
+        }
+
+        // Si el backend responde una orden activa válida, actualizamos el estado
+        if (activeList.length > 0) {
+          setActiveOrders(activeList);
+
+          // Unir socket a las salas de las órdenes activas
+          if (socket && socket.connected) {
+            activeList.forEach((ord) => {
+              const cleanId = (ord._id || ord.id || "")
+                .toString()
+                .replace(/^order_/, "");
+              socket.emit("join_order", cleanId);
+              socket.emit("join", cleanId);
+            });
+          }
         } else {
-          setActiveOrder(null);
+          // PROTETOR DE PERSISTENCIA:
+          // Si el backend da vacío, solo limpiamos si en localStorage la orden ya estaba completada/cancelada
+          const savedLocal = localStorage.getItem(
+            `activeOrders_${validDriverId}`,
+          );
+          if (savedLocal) {
+            try {
+              const parsedLocal = JSON.parse(savedLocal);
+              if (
+                parsedLocal.length > 0 &&
+                (parsedLocal[0].status === "completed" ||
+                  parsedLocal[0].status === "cancelled")
+              ) {
+                setActiveOrders([]);
+              }
+            } catch (e) {
+              console.error("Error leyendo caché local:", e);
+            }
+          }
         }
       }
     } catch (err) {
-      console.error("Error consultando carrera activa:", err);
+      console.warn("Consulta de órdenes vacía o endpoint inaccesible:", err);
+    } finally {
+      setLoading(false);
     }
-  }, [driverId]);
+  }, [validDriverId, socket]);
 
-  // ==========================================
-  // 7. SOCKET.IO: CONEXIÓN EN TIEMPO REAL
-  // ==========================================
+  useEffect(() => {
+    if (isOnline) {
+      fetchOrders();
+    }
+  }, [isOnline, fetchOrders]);
+
+  // Re-vincular salas de Sockets tras reconexiones
+  useEffect(() => {
+    if (socket && socket.connected && activeOrders.length > 0) {
+      activeOrders.forEach((ord) => {
+        const cleanId = (ord._id || ord.id || "")
+          .toString()
+          .replace(/^order_/, "");
+        socket.emit("join_order", cleanId);
+        socket.emit("join", cleanId);
+      });
+    }
+  }, [socket, socket?.connected, activeOrders]);
+
+  // --------------------------------------------------------------------------
+  // 2. ESCUCHAR EVENTOS EN TIEMPO REAL (WEBSOCKETS)
+  // --------------------------------------------------------------------------
+  useEffect(() => {
+    if (!socket || !isOnline) return;
+
+    // Registrar conductor en el servidor WebSocket
+    socket.emit("register_driver", {
+      driverId: validDriverId,
+      driverName,
+    });
+
+    const handleNewOrder = (newOrder) => {
+      setAvailableOrders((prev) => {
+        const orderId = newOrder._id || newOrder.id;
+        const exists = prev.some((o) => (o._id || o.id) === orderId);
+        if (exists) return prev;
+        return [newOrder, ...prev];
+      });
+    };
+
+    const handleOrderCancelled = (data) => {
+      const orderId = data.orderId || data._id;
+      setAvailableOrders((prev) =>
+        prev.filter((o) => (o._id || o.id) !== orderId),
+      );
+
+      setActiveOrders((prev) => {
+        const wasActive = prev.some((o) => (o._id || o.id) === orderId);
+        if (wasActive) {
+          setError(
+            "Una de tus carreras en curso fue cancelada por el cliente.",
+          );
+        }
+        return prev.filter((o) => (o._id || o.id) !== orderId);
+      });
+    };
+
+    const handleStatusUpdated = (data) => {
+      const orderId = data.orderId || data._id;
+      const newStatus = data.status;
+
+      if (["completed", "cancelled"].includes(newStatus?.toLowerCase())) {
+        setActiveOrders((prev) =>
+          prev.filter((o) => (o._id || o.id) !== orderId),
+        );
+      } else {
+        setActiveOrders((prev) =>
+          prev.map((o) =>
+            (o._id || o.id) === orderId ? { ...o, status: newStatus } : o,
+          ),
+        );
+      }
+    };
+
+    // Handler optimizado con filtro anti-duplicados y ráfagas
+    const handleReceiveMessage = (msg) => {
+      const incomingText = msg.text || msg.message;
+      const incomingSender = msg.senderType || msg.sender;
+
+      setChatMessages((prev) => {
+        const lastMsg = prev[prev.length - 1];
+        if (
+          lastMsg &&
+          (lastMsg.text || lastMsg.message) === incomingText &&
+          (lastMsg.senderType || lastMsg.sender) === incomingSender
+        ) {
+          return prev;
+        }
+        return [...prev, msg];
+      });
+    };
+
+    // Suscripción a eventos
+    socket.on("new_order", handleNewOrder);
+    socket.on("order_created", handleNewOrder);
+    socket.on("order_cancelled", handleOrderCancelled);
+    socket.on("order_status_updated", handleStatusUpdated);
+    socket.on("orderUpdated", handleStatusUpdated);
+    socket.on("order:status_updated", handleStatusUpdated);
+
+    // Limpieza de canal previo antes de registrar la escucha única
+    socket.off("receive_message");
+    socket.on("receive_message", handleReceiveMessage);
+
+    return () => {
+      socket.off("new_order", handleNewOrder);
+      socket.off("order_created", handleNewOrder);
+      socket.off("order_cancelled", handleOrderCancelled);
+      socket.off("order_status_updated", handleStatusUpdated);
+      socket.off("orderUpdated", handleStatusUpdated);
+      socket.off("order:status_updated", handleStatusUpdated);
+      socket.off("receive_message", handleReceiveMessage);
+    };
+  }, [socket, isOnline, validDriverId, driverName]);
+
+  // --------------------------------------------------------------------------
+  // 3. RASTREO GPS Y EMISIÓN EN TIEMPO REAL
+  // --------------------------------------------------------------------------
   useEffect(() => {
     if (!isOnline) {
-      if (socketRef.current) socketRef.current.disconnect();
+      setCurrentCoords(null);
+      setGpsAccuracy(null);
       return;
     }
 
-    try {
-      const socket = io(SOCKET_URL, {
-        transports: ["websocket", "polling"],
-        query: { driverId },
-      });
-      socketRef.current = socket;
+    if ("geolocation" in navigator) {
+      const watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const coords = {
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+          };
+          setCurrentCoords(coords);
+          setGpsAccuracy(pos.coords.accuracy);
 
-      socket.on("connect", () => {
-        console.log(
-          "🟢 Conectado exitosamente por Socket.io como Conductor:",
-          driverId,
-        );
-        fetchOrders();
-        checkActiveOrder();
-      });
-
-      socket.on("order:created", () => {
-        playAlertSound();
-        fetchOrders();
-      });
-
-      socket.on("order:taken", () => {
-        fetchOrders();
-      });
-
-      socket.on("order_status_updated", (updatedOrder) => {
-        fetchOrders();
-        const activeId = activeOrder?._id || activeOrder?.id;
-        const updatedId = updatedOrder?._id || updatedOrder?.id;
-
-        if (activeId && activeId === updatedId) {
-          const statusLower = (updatedOrder.status || "").toLowerCase();
-          if (statusLower === "completed" || statusLower === "cancelled") {
-            setActiveOrder(null);
-            setIsChatOpen(false);
-          } else {
-            setActiveOrder(updatedOrder);
+          if (socket && socket.connected) {
+            socket.emit("update_driver_location", {
+              driverId: validDriverId,
+              driverName,
+              lat: coords.lat,
+              lng: coords.lng,
+              activeOrderIds: activeOrders.map((o) => o._id || o.id),
+              isOnline: true,
+            });
           }
-        }
-      });
+        },
+        (err) => {
+          console.error("Error obteniendo ubicación GPS:", err);
+          setError("No se pudo obtener la ubicación GPS en tiempo real.");
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
+      );
 
-      socket.on("chat:message", (msg) => {
-        const activeId = activeOrder?._id || activeOrder?.id;
-        if (msg.orderId === activeId) {
-          setChatMessages((prev) => [...prev, msg]);
-        }
-      });
-
-      socket.on("disconnect", () => {
-        console.log("🔴 Socket.io Desconectado");
-      });
-    } catch (err) {
-      console.warn("Error inicializando Socket.io:", err);
-    }
-
-    return () => {
-      if (socketRef.current) socketRef.current.disconnect();
-    };
-  }, [
-    isOnline,
-    driverId,
-    fetchOrders,
-    checkActiveOrder,
-    activeOrder?._id,
-    activeOrder?.id,
-  ]);
-
-  // ==========================================
-  // 7.5 HTTP POLLING DE RESPALDO DE SEGURIDAD
-  // ==========================================
-  useEffect(() => {
-    if (!isOnline) return;
-
-    if (activeOrder) {
-      checkActiveOrder();
+      return () => navigator.geolocation.clearWatch(watchId);
     } else {
-      fetchOrders();
+      setError("La geolocalización no está soportada en este dispositivo.");
+    }
+  }, [isOnline, socket, validDriverId, driverName, activeOrders]);
+
+  // --------------------------------------------------------------------------
+  // HANDLERS / ACCIONES DE NEGOCIO
+  // --------------------------------------------------------------------------
+  const handleAcceptOrder = async (order) => {
+    if (activeOrders.length >= 2) {
+      setError("Ya tienes el límite máximo de 2 carreras activas.");
+      return;
     }
 
-    const interval = setInterval(() => {
-      if (activeOrder) {
-        checkActiveOrder();
-      } else {
-        fetchOrders();
-      }
-    }, 4000);
-
-    return () => clearInterval(interval);
-  }, [isOnline, activeOrder, fetchOrders, checkActiveOrder]);
-
-  // ==========================================
-  // 8. RASTREO GPS EN TIEMPO REAL
-  // ==========================================
-  useEffect(() => {
-    if (!isOnline || !("geolocation" in navigator)) return;
-
-    let lastSendTime = 0;
-    let lastValidPosition = null;
-
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      (position) => {
-        const { latitude, longitude, accuracy, heading, speed } =
-          position.coords;
-        const now = Date.now();
-
-        setCurrentCoords({ lat: latitude, lng: longitude });
-        setGpsAccuracy(accuracy);
-
-        // 🔴 1. FILTRO DE PRECISIÓN
-        if (accuracy > 120) {
-          console.warn(`[GPS] Baja precisión detectada (${accuracy}m)`);
-          return;
-        }
-
-        // 🔴 2. FILTRO ANTI-SALTO
-        if (lastValidPosition) {
-          const dist = distance(
-            lastValidPosition.lat,
-            lastValidPosition.lng,
-            latitude,
-            longitude,
-          );
-
-          if (dist > 200) {
-            console.warn("[GPS] Salto inusual de ubicación (>200m), ignorado");
-            return;
-          }
-        }
-
-        // 🟢 3. SUAVIZADO
-        const smoothed = smoothPosition(lastValidPosition, {
-          lat: latitude,
-          lng: longitude,
-        });
-
-        lastValidPosition = smoothed;
-
-        // 🟢 4. FRECUENCIA DINÁMICA
-        const interval = getDynamicInterval(speed);
-
-        if (now - lastSendTime < interval) return;
-        lastSendTime = now;
-
-        const locationData = {
-          driverId,
-          driverName: driver?.name || driverName,
-          phone: driver?.phone || "",
-          vehiclePlate: driver?.vehiclePlate || "",
-          lat: smoothed.lat,
-          lng: smoothed.lng,
-          heading: heading || 0,
-          speed: speed || 0,
-          accuracy,
-          timestamp: now,
-          isAvailable: isOnline && !activeOrder,
-        };
-
-        // 🟢 5. ENVÍO VÍA SOCKET O BUFFER
-        if (socketRef.current?.connected) {
-          if (queueRef.current && queueRef.current.length > 0) {
-            queueRef.current = [];
-          }
-          socketRef.current.emit("update_driver_location", locationData);
-        } else if (queueRef.current) {
-          if (queueRef.current.length >= 5) {
-            queueRef.current.shift();
-          }
-          queueRef.current.push(locationData);
-        }
-
-        setGeoError(null);
-      },
-      (err) => {
-        console.warn("GPS error:", err.message);
-        setGeoError("Señal GPS débil...");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 5000,
-      },
-    );
-
-    return () => {
-      if (watchIdRef.current) {
-        navigator.geolocation.clearWatch(watchIdRef.current);
-      }
-    };
-  }, [isOnline, driverId, driver, activeOrder, driverName]);
-
-  // ==========================================
-  // 9. ACCIONES DEL CONDUCTOR
-  // ==========================================
-  const handleAcceptOrder = async (order) => {
     setLoading(true);
     setError("");
-
     const orderId = order._id || order.id;
+    const cleanId = orderId.toString().replace(/^order_/, "");
 
     try {
-      const res = await fetch(`${API_BASE}/orders/take/${orderId}`, {
+      if (socket && socket.connected) {
+        socket.emit("join_order", cleanId);
+        socket.emit("join", cleanId);
+        socket.emit("accept_order", {
+          orderId: cleanId,
+          driverId: validDriverId,
+          driverName,
+        });
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/orders/take/${cleanId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ driverId }),
+        body: JSON.stringify({
+          driverId: validDriverId,
+          driverName,
+        }),
       });
 
-      const responseData = await res.json();
-
-      if (res.ok) {
-        setActiveOrder(responseData.order || responseData);
-        fetchOrders();
-      } else {
-        setError(responseData.message || "No se pudo tomar la carrera.");
+      const contentType = res.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
+        const textError = await res.text();
+        console.error("Respuesta no-JSON del servidor:", textError);
+        throw new Error(`El servidor respondió con estado ${res.status}`);
       }
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.message || "No se pudo tomar la carrera.");
+        return;
+      }
+
+      const takenOrder = data.order || { ...order, status: "on_the_way" };
+
+      setActiveOrders((prev) => [...prev, takenOrder]);
+      setAvailableOrders((prev) =>
+        prev.filter((o) => (o._id || o.id) !== orderId),
+      );
     } catch (err) {
-      setError("Error de red al aceptar la carrera.");
+      console.error("Error al tomar carrera:", err);
+      setError(err.message || "Error de conexión al aceptar la carrera.");
     } finally {
       setLoading(false);
     }
   };
 
-  const handleUpdateStatus = async (nextStatus) => {
-    const activeId = activeOrder?._id || activeOrder?.id;
-    if (!activeId) return;
+  const handleUpdateStatus = async (newStatus, targetOrderId) => {
+    const orderToUpdate = targetOrderId
+      ? activeOrders.find((o) => (o._id || o.id) === targetOrderId)
+      : activeOrders[0];
+
+    if (!orderToUpdate) return;
+    const orderId = orderToUpdate._id || orderToUpdate.id;
+    const cleanId = orderId.toString().replace(/^order_/, "");
+
+    // Normalización de estado para compatibilidad con backend
+    const statusMapper = {
+      COMPLETED: "completed",
+      completed: "completed",
+      CANCELLED: "cancelled",
+      cancelled: "cancelled",
+      ON_THE_WAY: "on_the_way",
+      ARRIVED: "arrived",
+      IN_PROGRESS: "in_progress",
+    };
+
+    const finalStatus = statusMapper[newStatus] || newStatus.toLowerCase();
+
     setLoading(true);
+    setError("");
 
     try {
-      const res = await fetch(`${API_BASE}/orders/${activeId}/status`, {
+      if (socket && socket.connected) {
+        socket.emit("update_order_status", {
+          orderId: cleanId,
+          status: finalStatus,
+        });
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/orders/${cleanId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus, driverId }),
+        body: JSON.stringify({ status: finalStatus }),
       });
 
-      if (res.ok) {
-        const nextStatusLower = nextStatus.toLowerCase();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.message || "Error actualizando el estado.");
+      }
+
+      const formattedStatus = finalStatus.toLowerCase();
+
+      if (formattedStatus === "completed" || formattedStatus === "cancelled") {
+        setActiveOrders((prev) =>
+          prev.filter((o) => (o._id || o.id) !== orderId),
+        );
         if (
-          nextStatusLower === "completed" ||
-          nextStatusLower === "cancelled"
+          chatTargetOrder &&
+          (chatTargetOrder._id || chatTargetOrder.id) === orderId
         ) {
-          setActiveOrder(null);
-          setChatMessages([]);
           setIsChatOpen(false);
-          fetchOrders();
-        } else {
-          setActiveOrder((prev) => ({ ...prev, status: nextStatus }));
+          setChatMessages([]);
+          setChatTargetOrder(null);
         }
+        fetchOrders();
+      } else {
+        setActiveOrders((prev) =>
+          prev.map((o) =>
+            (o._id || o.id) === orderId ? { ...o, status: finalStatus } : o,
+          ),
+        );
       }
     } catch (err) {
-      console.error("Error al cambiar estado:", err);
+      console.error("Error al actualizar estado:", err);
+      setError(err.message || "Error al cambiar el estado de la carrera.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleOpenChat = (order) => {
+    setChatTargetOrder(order);
+    setIsChatOpen(true);
+
+    const cleanId = (order._id || order.id || "")
+      .toString()
+      .replace(/^order_/, "");
+    if (socket && socket.connected) {
+      socket.emit("join_order", cleanId);
+      socket.emit("join", cleanId);
     }
   };
 
   const handleSendMessage = (e) => {
     e.preventDefault();
-    const activeId = activeOrder?._id || activeOrder?.id;
-    if (!newMessageText.trim() || !activeId) return;
+    if (!newMessageText.trim() || !chatTargetOrder) return;
 
-    const messageObj = {
+    const rawId = chatTargetOrder._id || chatTargetOrder.id;
+    const cleanId = rawId.toString().replace(/^order_/, "");
+
+    const newMsg = {
+      orderId: cleanId,
       senderType: "driver",
-      senderId: driverId,
+      sender: "driver",
       text: newMessageText.trim(),
+      message: newMessageText.trim(),
       timestamp: new Date().toISOString(),
     };
 
-    if (socketRef.current) {
-      socketRef.current.emit("chat_message", {
-        orderId: activeId,
-        message: messageObj,
-      });
+    // Emitimos una sola vía al servidor
+    if (socket && socket.connected) {
+      socket.emit("send_message", newMsg);
     }
 
-    setChatMessages((prev) => [...prev, messageObj]);
     setNewMessageText("");
   };
 
-  const openExternalNavigation = (lat, lng, address) => {
-    if (lat && lng) {
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
-        "_blank",
-      );
-    } else if (address) {
-      window.open(
-        `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`,
-        "_blank",
-      );
+  useEffect(() => {
+    if (isChatOpen) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  };
-  // ==========================================
-  // INTERFAZ DE USUARIO (JSX)
-  // ==========================================
+  }, [chatMessages, isChatOpen]);
+
+  // ============================================================================
+  // RENDERIZADO DE INTERFAZ DE USUARIO (UI)
+  // ============================================================================
   return (
     <div
-      className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative transition-all duration-300 ${
-        activeOrder ? "pb-72" : "pb-6"
+      className={`min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between relative transition-all duration-300 font-sans ${
+        activeOrders.length > 0 ? "pb-72" : "pb-6"
       }`}
     >
-      {/* 1. CABECERA SUPERIOR */}
-      <header className="bg-slate-900/90 border-b border-slate-800 p-4 sticky top-0 z-20 backdrop-blur flex justify-between items-center shadow-lg">
+      {/* CABECERA PRINCIPAL */}
+      <header className="bg-slate-900/90 border-b border-slate-800/80 p-4 sticky top-0 z-20 backdrop-blur-md flex justify-between items-center shadow-2xl">
         <div className="flex items-center space-x-3">
-          <div
-            className={`w-3 h-3 rounded-full ${
-              isOnline ? "bg-emerald-500 animate-pulse" : "bg-red-500"
-            }`}
-          />
+          <div className="relative flex items-center justify-center">
+            <span
+              className={`w-3.5 h-3.5 rounded-full ${
+                isOnline
+                  ? "bg-emerald-500 animate-ping absolute opacity-75"
+                  : "bg-red-500"
+              }`}
+            />
+            <span
+              className={`w-3 h-3 rounded-full ${
+                isOnline ? "bg-emerald-500" : "bg-red-500"
+              }`}
+            />
+          </div>
           <div>
-            <h1 className="font-bold text-sm text-slate-100">{driverName}</h1>
-            <p className="text-xs text-slate-400">
+            <h1 className="font-extrabold text-sm text-slate-100 tracking-tight flex items-center gap-1.5">
+              {driverName}
+              <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono">
+                PRO
+              </span>
+            </h1>
+            <p className="text-[11px] text-slate-400 font-medium">
               {isOnline
                 ? gpsAccuracy
                   ? `GPS Activo (±${Math.round(gpsAccuracy)}m)`
-                  : "Conectado - Buscando GPS"
-                : "Desconectado"}
+                  : "Conectado - Buscando GPS..."
+                : "Fuera de Servicio"}
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-2">
-          {/* BOTÓN CONECTAR / DESCONECTAR */}
           <button
             onClick={() => setIsOnline(!isOnline)}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
+            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all shadow-md ${
               isOnline
-                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                : "bg-red-500/10 text-red-400 border border-red-500/30"
+                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20"
+                : "bg-red-500/10 text-red-400 border border-red-500/30 hover:bg-red-500/20"
             }`}
           >
             <Power className="w-3.5 h-3.5" />
             <span>{isOnline ? "DISPONIBLE" : "OFFLINE"}</span>
           </button>
 
-          {/* BOTÓN CERRAR SESIÓN */}
           <button
             onClick={onLogout}
-            className="p-1.5 text-slate-400 hover:text-slate-200 transition-colors"
+            className="p-1.5 text-slate-400 hover:text-slate-100 bg-slate-800/50 hover:bg-slate-800 rounded-lg transition-colors border border-slate-700/50"
             title="Cerrar sesión"
           >
             <X className="w-5 h-5" />
@@ -615,96 +580,92 @@ export default function DriverDashboard({ driver, onLogout }) {
         </div>
       </header>
 
-      {/* MENSAJES DE ERROR */}
+      {/* BANNER DE NOTIFICACIONES O ERRORES */}
       {error && (
-        <div className="bg-red-500/10 border-b border-red-500/30 text-red-400 p-3 text-xs text-center flex justify-between items-center">
-          <span>{error}</span>
-          <button onClick={() => setError("")} className="font-bold">
+        <div className="bg-red-500/10 border-b border-red-500/30 text-red-400 p-3 text-xs text-center flex justify-between items-center animate-fadeIn">
+          <div className="flex items-center space-x-2 mx-auto">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+            <span className="font-medium">{error}</span>
+          </div>
+          <button
+            onClick={() => setError("")}
+            className="font-bold text-red-400 hover:text-red-200"
+          >
             ✕
           </button>
         </div>
       )}
 
-      {/* 2. PANEL PRINCIPAL / LISTA DE CARRERAS DISPONIBLES */}
+      {/* PANEL PRINCIPAL / LISTADO DE SOLICITUDES */}
       <main className="p-4 flex-1 max-w-xl mx-auto w-full">
         {!isOnline ? (
-          <div className="text-center py-16 px-4">
-            <Power className="w-16 h-16 text-slate-700 mx-auto mb-4 animate-bounce" />
-            <h2 className="text-lg font-bold text-slate-300 mb-1">
-              Estás fuera de línea
+          <div className="text-center py-20 px-4 bg-slate-900/40 border border-slate-800/60 rounded-3xl mt-4 shadow-xl">
+            <div className="w-20 h-20 bg-slate-800/50 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-700/50">
+              <Power className="w-10 h-10 text-slate-500" />
+            </div>
+            <h2 className="text-base font-bold text-slate-200 mb-1">
+              Estás fuera de servicio
             </h2>
-            <p className="text-xs text-slate-500 max-w-xs mx-auto">
-              Activa tu disponibilidad en el botón superior para empezar a
-              recibir solicitudes cercanas.
+            <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
+              Activa tu disponibilidad en la esquina superior derecha para
+              recibir solicitudes en Inírida.
             </p>
           </div>
         ) : (
           <div>
-            <div className="flex justify-between items-center mb-3">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center space-x-1">
-                <span>Carreras Disponibles</span>
-                <span className="bg-amber-500/20 text-amber-400 text-[10px] px-2 py-0.5 rounded-full ml-2">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center space-x-2">
+                <h2 className="text-xs font-black uppercase tracking-wider text-slate-400">
+                  Carreras Disponibles
+                </h2>
+                <span className="bg-amber-500/20 text-amber-400 font-bold text-[11px] px-2.5 py-0.5 rounded-full border border-amber-500/30">
                   {availableOrders.length}
                 </span>
-              </h2>
+              </div>
 
               <button
                 onClick={fetchOrders}
-                className="text-slate-400 hover:text-amber-400 transition-colors"
+                className="flex items-center space-x-1 text-slate-400 hover:text-amber-400 text-xs font-semibold transition-colors bg-slate-900 border border-slate-800 px-2.5 py-1.5 rounded-lg"
                 title="Actualizar carreras"
               >
-                <RefreshCw className="w-4 h-4" />
+                <RefreshCw
+                  className={`w-3.5 h-3.5 ${
+                    loading ? "animate-spin text-amber-400" : ""
+                  }`}
+                />
+                <span>Actualizar</span>
               </button>
             </div>
 
-            {/* LISTA DE CARRERAS */}
             {availableOrders.length === 0 ? (
-              <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-8 text-center my-4">
-                <Clock className="w-10 h-10 text-slate-600 mx-auto mb-2" />
-                <p className="text-xs text-slate-400">
-                  Buscando solicitudes cercanas...
+              <div className="bg-slate-900/50 border border-slate-800/80 rounded-2xl p-10 text-center my-4 shadow-inner">
+                <Clock className="w-10 h-10 text-slate-600 mx-auto mb-3 animate-pulse" />
+                <p className="text-xs font-medium text-slate-400">
+                  Buscando solicitudes cercanas en tiempo real...
                 </p>
               </div>
             ) : (
               <div className="space-y-3">
                 {availableOrders.map((ord) => {
-                  const rideDetails = ord?.rideDetails || ord;
-
-                  // EXTRAER ORIGEN ROBUSTO
                   const item = ord?.items?.[0] || {};
-
                   const originText =
                     item.origen ||
                     item.origin ||
                     item.pickupAddress ||
-                    item.originAddress ||
                     ord?.origen ||
                     ord?.originAddress ||
-                    ord?.pickupAddress ||
                     "Origen no especificado";
 
-                  // EXTRAER DESTINO ROBUSTO
                   const destinationText =
                     item.detalle ||
                     item.destino ||
                     item.destination ||
-                    item.dropoffAddress ||
-                    item.description ||
-                    ord?.detalle ||
                     ord?.destino ||
                     ord?.destinationAddress ||
-                    "Destino no especificado";
+                    "Sin especificar";
 
-                  const originLat =
-                    ord?.originCoords?.lat ||
-                    rideDetails?.originLat ||
-                    rideDetails?.pickupLat ||
-                    ord?.originLat;
-                  const originLng =
-                    ord?.originCoords?.lng ||
-                    rideDetails?.originLng ||
-                    rideDetails?.pickupLng ||
-                    ord?.originLng;
+                  const originLat = ord?.originCoords?.lat || ord?.originLat;
+                  const originLng = ord?.originCoords?.lng || ord?.originLng;
 
                   const distance =
                     currentCoords && originLat && originLng
@@ -716,67 +677,71 @@ export default function DriverDashboard({ driver, onLogout }) {
                         )
                       : null;
 
+                  const isMaxReached = activeOrders.length >= 2;
+
                   return (
                     <div
                       key={ord._id || ord.id}
-                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md hover:border-amber-500/40 transition-all"
+                      className="bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-2xl p-4 shadow-lg transition-all"
                     >
-                      <div className="flex justify-between items-start mb-2">
-                        <div>
-                          <span className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex items-center space-x-2">
+                          <span className="text-[11px] bg-slate-800 text-amber-400 px-2 py-0.5 rounded font-mono font-bold border border-slate-700">
                             #
                             {(ord?._id || ord?.id || "0000")
                               .toString()
                               .slice(-4)}
                           </span>
                           {distance && (
-                            <span className="ml-2 text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-bold">
-                              A {distance} km de ti
+                            <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded font-bold">
+                              A {distance} km
                             </span>
                           )}
                         </div>
-                        <div className="text-right">
-                          <span className="text-xs font-bold text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
-                            Tarifa Estándar
-                          </span>
-                        </div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 bg-slate-800/80 px-2 py-1 rounded-lg border border-slate-700">
+                          Motocarro
+                        </span>
                       </div>
 
-                      {/* DETALLES DE RUTA */}
-                      <div className="space-y-2 text-xs mb-4">
-                        <div className="flex items-start space-x-2">
+                      <div className="space-y-2.5 text-xs mb-4 bg-slate-950/40 p-3 rounded-xl border border-slate-800/50">
+                        <div className="flex items-start space-x-2.5">
                           <MapPin className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-[10px] text-slate-500 uppercase font-semibold">
-                              Origen
+                            <p className="text-[9px] text-slate-500 uppercase font-black">
+                              Punto de Recogida
                             </p>
-                            <p className="text-slate-200 line-clamp-1">
+                            <p className="text-slate-200 font-medium line-clamp-2">
                               {originText}
                             </p>
                           </div>
                         </div>
 
-                        <div className="flex items-start space-x-2">
+                        <div className="border-t border-slate-800/60 my-1" />
+
+                        <div className="flex items-start space-x-2.5">
                           <Navigation className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-[10px] text-slate-500 uppercase font-semibold">
+                            <p className="text-[9px] text-slate-500 uppercase font-black">
                               Destino
                             </p>
-                            <p className="text-slate-200 line-clamp-1">
+                            <p className="text-slate-200 font-medium line-clamp-2">
                               {destinationText}
                             </p>
                           </div>
                         </div>
                       </div>
 
-                      {/* BOTÓN DIRECTO DE ACEPTAR */}
                       <button
                         onClick={() => handleAcceptOrder(ord)}
-                        disabled={loading || !!activeOrder}
-                        className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs transition-colors shadow-lg flex justify-center items-center space-x-2 disabled:opacity-50"
+                        disabled={loading || isMaxReached}
+                        className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-black py-3 rounded-xl text-xs transition-colors shadow-lg shadow-amber-500/10 flex justify-center items-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <CheckCircle className="w-4 h-4" />
-                        <span>Aceptar Carrera</span>
+                        <span>
+                          {isMaxReached
+                            ? "Límite alcanzado (2/2 activas)"
+                            : "Aceptar Carrera"}
+                        </span>
                       </button>
                     </div>
                   );
@@ -787,260 +752,172 @@ export default function DriverDashboard({ driver, onLogout }) {
         )}
       </main>
 
-      {/* 3. TARJETA FLOTANTE (CARRERA EN CURSO) */}
-      {activeOrder &&
-        (() => {
-          const item = activeOrder?.items?.[0] || {};
+      {/* TARJETA INFERIOR DE CARRERAS ACTIVAS */}
+      {activeOrders.length > 0 && (
+        <ActiveOrderCard
+          activeOrders={activeOrders}
+          loading={loading}
+          onUpdateStatus={handleUpdateStatus}
+          onOpenChat={handleOpenChat}
+        />
+      )}
 
-          // EXTRACCIÓN ROBUSTA DE ORIGEN EN CARRERA ACTIVA
-          const activeOriginText =
-            item.origen ||
-            item.origin ||
-            item.pickupAddress ||
-            item.originAddress ||
-            activeOrder.origen ||
-            activeOrder.origin ||
-            activeOrder.pickupAddress ||
-            activeOrder.originAddress ||
-            "Origen no especificado";
-
-          // EXTRACCIÓN ROBUSTA DE DESTINO EN CARRERA ACTIVA
-          const activeDestinationText =
-            item.detalle ||
-            item.destino ||
-            item.destination ||
-            item.dropoffAddress ||
-            item.description ||
-            activeOrder.detalle ||
-            activeOrder.destino ||
-            activeOrder.destination ||
-            activeOrder.destinationAddress ||
-            "Destino no especificado";
-
-          const activeCustomerName =
-            activeOrder.customer?.name ||
-            activeOrder.customerName ||
-            activeOrder.clientName ||
-            activeOrder.passengerName ||
-            "Cliente";
-
-          const activeCustomerPhone =
-            activeOrder.customer?.phone ||
-            activeOrder.clientPhone ||
-            activeOrder.customerPhone;
-
-          // Normalizar estado (Soporta minúsculas y mayúsculas de MongoDB)
-          const currentStatus = (activeOrder.status || "").toLowerCase();
-
-          return (
-            <div className="fixed bottom-2 left-2 right-2 max-w-lg mx-auto z-30 transition-all duration-300">
-              <div className="bg-slate-900 border border-amber-500/50 rounded-2xl shadow-2xl p-3.5 backdrop-blur-md max-h-[80vh] flex flex-col justify-between overflow-y-auto">
-                {/* CABECERA CON BOTÓN PARA MINIMIZAR/COLAPSAR */}
-                <div className="flex justify-between items-center pb-2 border-b border-slate-800">
-                  <div className="flex items-center space-x-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
-                    </span>
-                    <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                      Carrera en Curso
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    {/* BOTÓN COLAPSAR / EXPANDIR TARJETA */}
-                    <button
-                      onClick={() => setIsMinimized(!isMinimized)}
-                      className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg text-xs"
-                      title={isMinimized ? "Expandir" : "Minimizar"}
-                    >
-                      {isMinimized ? (
-                        <ChevronUp className="w-4 h-4" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4" />
-                      )}
-                    </button>
-
-                    {/* BOTÓN CHAT */}
-                    <button
-                      onClick={() => setIsChatOpen(!isChatOpen)}
-                      className="bg-slate-800 hover:bg-slate-700 text-amber-400 p-1.5 rounded-lg text-xs flex items-center space-x-1 border border-amber-500/20"
-                    >
-                      <MessageSquare className="w-4 h-4" />
-                    </button>
-
-                    {/* BOTÓN LLAMAR */}
-                    {activeCustomerPhone && (
-                      <a
-                        href={`tel:${activeCustomerPhone}`}
-                        className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 p-1.5 rounded-lg text-xs border border-emerald-500/30"
-                      >
-                        <Phone className="w-4 h-4" />
-                      </a>
-                    )}
-                  </div>
-                </div>
-
-                {/* CONTENIDO (SE OCULTA SI ESTÁ MINIMIZADO) */}
-                {!isMinimized && (
-                  <>
-                    {/* DETALLES CLIENTE */}
-                    <div className="grid grid-cols-2 gap-2 my-2 text-xs">
-                      <div>
-                        <p className="text-[10px] text-slate-500 uppercase">
-                          Cliente
-                        </p>
-                        <p className="font-semibold text-slate-200 truncate">
-                          {activeCustomerName}
-                        </p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-[10px] text-slate-500 uppercase">
-                          Estado
-                        </p>
-                        <p className="font-bold text-amber-400 text-xs capitalize">
-                          {currentStatus.replace("_", " ")}
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* RUTA Y DIRECCIONES */}
-                    <div className="space-y-2 mb-3 bg-slate-950/70 p-2.5 rounded-xl border border-slate-800 text-xs">
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-2 overflow-hidden">
-                          <MapPin className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span className="truncate text-slate-200 text-xs font-medium">
-                            {activeOriginText}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center space-x-2 overflow-hidden">
-                          <Navigation className="w-4 h-4 text-amber-400 shrink-0" />
-                          <span className="truncate text-slate-200 text-xs font-medium">
-                            {activeDestinationText}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                {/* BOTONES DE ACCIÓN (SIEMPRE VISIBLES INCLUSO MINIMIZADO) */}
-                <div className="pt-1">
-                  {/* ESTADOS DONDE SE MUESTRA "INICIAR VIAJE" */}
-                  {[
-                    "accepted",
-                    "aceptado",
-                    "assigned",
-                    "asignado",
-                    "assigned_driver",
-                    "pending_driver",
-                  ].includes(currentStatus) && (
-                    <button
-                      onClick={() => handleUpdateStatus("IN_PROGRESS")}
-                      disabled={loading}
-                      className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
-                    >
-                      <Navigation className="w-4 h-4" />
-                      <span>Iniciar Viaje (En camino)</span>
-                    </button>
-                  )}
-
-                  {/* ESTADOS DONDE SE MUESTRA "FINALIZAR CARRERA" */}
-                  {[
-                    "in_progress",
-                    "en_camino",
-                    "en camino",
-                    "inprogress",
-                  ].includes(currentStatus) && (
-                    <button
-                      onClick={() => handleUpdateStatus("COMPLETED")}
-                      disabled={loading}
-                      className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
-                    >
-                      <CheckCircle className="w-4 h-4" />
-                      <span>Finalizar Carrera</span>
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-      {/* 4. MODAL DESPLEGABLE DEL CHAT */}
-      {isChatOpen && activeOrder && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-40 flex items-end sm:items-center justify-center p-3">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg h-[80vh] flex flex-col justify-between overflow-hidden shadow-2xl">
-            {/* CABECERA CHAT */}
-            <div className="p-3 bg-slate-800/80 border-b border-slate-700 flex justify-between items-center">
+      {/* MODAL DE CHAT EN VIVO (Diseño compacto PRO) */}
+      {isChatOpen && chatTargetOrder && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-sm h-[480px] flex flex-col justify-between overflow-hidden shadow-2xl shadow-black/80">
+            {/* Header del Chat */}
+            <div className="p-3.5 bg-slate-800/90 border-b border-slate-700/60 flex justify-between items-center">
               <div className="flex items-center space-x-2">
-                <MessageSquare className="w-4 h-4 text-amber-400" />
-                <span className="font-bold text-xs text-slate-200">
-                  Chat con{" "}
-                  {activeOrder.customer?.name ||
-                    activeOrder.clientName ||
-                    activeOrder.passengerName ||
-                    "Cliente"}
-                </span>
+                <div className="p-1.5 bg-amber-500/10 border border-amber-500/20 rounded-lg">
+                  <MessageSquare className="w-4 h-4 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-xs text-slate-100 leading-tight">
+                    Chat de Carrera
+                  </h3>
+                  <p className="text-[10px] text-amber-400 font-mono font-semibold">
+                    #
+                    {(chatTargetOrder._id || chatTargetOrder.id || "")
+                      .toString()
+                      .slice(-4)}
+                  </p>
+                </div>
               </div>
               <button
                 onClick={() => setIsChatOpen(false)}
-                className="text-slate-400 hover:text-slate-100 p-1"
+                className="text-slate-400 hover:text-slate-100 hover:bg-slate-700/50 p-1.5 rounded-xl transition-colors"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* MENSAJES */}
-            <div className="p-3 flex-1 overflow-y-auto space-y-2 text-xs">
-              {chatMessages.length === 0 ? (
-                <p className="text-slate-500 text-center py-8">
-                  Envía un mensaje para ponerte en contacto con el cliente...
-                </p>
+            {/* Cuerpo de Mensajes */}
+            <div className="p-3.5 flex-1 overflow-y-auto space-y-3 text-xs bg-slate-950/40">
+              {chatMessages.filter((msg) => {
+                const targetClean = (
+                  chatTargetOrder._id ||
+                  chatTargetOrder.id ||
+                  ""
+                )
+                  .toString()
+                  .replace(/^order_/, "");
+                const msgClean = (msg.orderId || "")
+                  .toString()
+                  .replace(/^order_/, "");
+                return msgClean === targetClean;
+              }).length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-1 my-auto">
+                  <MessageSquare className="w-8 h-8 opacity-30" />
+                  <p className="text-[11px]">
+                    Inicia la conversación con el cliente
+                  </p>
+                </div>
               ) : (
-                chatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    className={`max-w-[80%] p-2.5 rounded-2xl ${
-                      (msg.senderType || "").toLowerCase() === "driver"
-                        ? "bg-amber-500/20 text-amber-200 border border-amber-500/30 ml-auto rounded-br-none"
-                        : "bg-slate-800 text-slate-200 border border-slate-700 mr-auto rounded-bl-none"
-                    }`}
-                  >
-                    <p>{msg.text}</p>
-                    <span className="text-[9px] text-slate-400 block text-right mt-1">
-                      {msg.timestamp
-                        ? new Date(msg.timestamp).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : ""}
-                    </span>
-                  </div>
-                ))
+                chatMessages
+                  .filter((msg) => {
+                    const targetClean = (
+                      chatTargetOrder._id ||
+                      chatTargetOrder.id ||
+                      ""
+                    )
+                      .toString()
+                      .replace(/^order_/, "");
+                    const msgClean = (msg.orderId || "")
+                      .toString()
+                      .replace(/^order_/, "");
+                    return msgClean === targetClean;
+                  })
+                  .map((msg, idx) => {
+                    // Detección robusta del rol
+                    const rawRole = (
+                      msg.senderType ||
+                      msg.sender ||
+                      msg.role ||
+                      ""
+                    )
+                      .toString()
+                      .toLowerCase();
+                    const isDriver =
+                      rawRole === "driver" || rawRole === "conductor";
+
+                    // Formatear la hora
+                    const formattedTime = msg.timestamp
+                      ? new Date(msg.timestamp).toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        })
+                      : new Date().toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                          hour12: true,
+                        });
+
+                    return (
+                      <div
+                        key={idx}
+                        className={`flex flex-col ${
+                          isDriver ? "items-end" : "items-start"
+                        }`}
+                      >
+                        {/* Header del mensaje: Nombre + Badge */}
+                        <div className="flex items-center space-x-1.5 mb-1 text-[10px]">
+                          <span className="font-bold text-slate-300">
+                            {isDriver
+                              ? "Conductor"
+                              : msg.senderName || "Cliente General"}
+                          </span>
+                          <span
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${
+                              isDriver
+                                ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                            }`}
+                          >
+                            {isDriver ? "Motocarro 🛺" : "Cliente 👤"}
+                          </span>
+                        </div>
+
+                        {/* Burbuja del mensaje */}
+                        <div
+                          className={`max-w-[82%] p-2.5 rounded-2xl text-[11px] leading-snug shadow-sm ${
+                            isDriver
+                              ? "bg-amber-500 text-slate-950 font-medium rounded-tr-none"
+                              : "bg-slate-800 text-slate-100 border border-slate-700/70 rounded-tl-none"
+                          }`}
+                        >
+                          <p>{msg.text || msg.message}</p>
+                          <span
+                            className={`block text-[9px] mt-1 text-right font-mono ${
+                              isDriver ? "text-slate-800/80" : "text-slate-400"
+                            }`}
+                          >
+                            {formattedTime}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
               )}
-              {/* Referencia para auto-scroll dinámico */}
               <div ref={chatEndRef} />
             </div>
 
-            {/* INPUT MENSAJE */}
+            {/* Formulario / Input */}
             <form
               onSubmit={handleSendMessage}
-              className="p-3 bg-slate-800/50 border-t border-slate-800 flex space-x-2"
+              className="p-2.5 bg-slate-900 border-t border-slate-800/80 flex items-center space-x-2"
             >
               <input
                 type="text"
-                placeholder="Escribe un mensaje..."
+                placeholder="Escribe un mensaje al cliente..."
                 value={newMessageText}
                 onChange={(e) => setNewMessageText(e.target.value)}
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                className="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 transition-colors"
               />
               <button
                 type="submit"
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 p-2.5 rounded-xl transition-colors"
+                className="bg-amber-500 text-slate-950 p-2.5 rounded-xl font-bold hover:bg-amber-400 transition-colors"
               >
                 <Send className="w-4 h-4" />
               </button>

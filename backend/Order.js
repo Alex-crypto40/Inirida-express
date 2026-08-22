@@ -23,9 +23,11 @@ const orderSchema = new mongoose.Schema(
       ref: "Store",
       default: null,
     },
+
+    // 🚀 AJUSTE AQUÍ: Permite ObjectId (Driver / User) u Objeto Embebido sin fallar en Populate
     driver: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Driver",
+      type: mongoose.Schema.Types.Mixed,
+      ref: "Driver", // Mantienes compatibilidad con Driver pero no rompe si se usa User o subdocumento
       default: null,
     },
 

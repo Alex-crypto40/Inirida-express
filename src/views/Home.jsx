@@ -20,9 +20,13 @@ function Home({ socket }) {
   // Estado para controlar la solicitud de motocarro / pedido activa
   const [activeOrder, setActiveOrder] = useState(null);
 
+  // Estado para desplegar/ocultar el mapa radar
+  const [showMap, setShowMap] = useState(true);
+
   const navigate = useNavigate();
-  const API_URL =
-    import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com/api";
+  const RAW_URL =
+    import.meta.env.VITE_API_URL || "https://inirida-express.onrender.com";
+  const API_URL = `${RAW_URL.replace(/\/api\/?$/, "")}/api`;
 
   const categoriasGlobales = [
     { id: "motocarro", label: "Motocarro", icon: "🛺" },
@@ -48,6 +52,8 @@ function Home({ socket }) {
             setActiveOrder(null);
           } else {
             setActiveOrder(order);
+            // Si hay una orden activa al entrar, ocultamos el mapa por defecto para dar espacio al widget
+            setShowMap(false);
           }
         } else {
           localStorage.removeItem("activeOrderId");
@@ -66,6 +72,8 @@ function Home({ socket }) {
       localStorage.setItem("activeOrderId", newOrder._id);
       setActiveOrder(newOrder);
       setSelectedDriver(null);
+      // Ocultar el mapa cuando se crea una carrera para enfocar el widget de seguimiento
+      setShowMap(false);
     }
   };
 
@@ -78,7 +86,10 @@ function Home({ socket }) {
       socket.emit("join_order", activeOrder._id);
 
       const handleOrderUpdate = (updatedOrder) => {
-        if (updatedOrder._id === activeOrder._id) {
+        if (
+          updatedOrder._id === activeOrder._id ||
+          updatedOrder.orderId === activeOrder._id
+        ) {
           setActiveOrder(updatedOrder);
 
           if (
@@ -92,9 +103,11 @@ function Home({ socket }) {
       };
 
       socket.on("order_updated", handleOrderUpdate);
+      socket.on("orderUpdated", handleOrderUpdate);
 
       return () => {
         socket.off("order_updated", handleOrderUpdate);
+        socket.off("orderUpdated", handleOrderUpdate);
       };
     }
 
@@ -123,10 +136,17 @@ function Home({ socket }) {
     return () => clearInterval(interval);
   }, [activeOrder?._id, API_URL, socket]);
 
-  // Cancelar carrera desde la tarjeta flotante
+  // Cancelar carrera desde la tarjeta flotante o formulario
   const handleCancelOrder = async (orderId) => {
+    const idToCancel = orderId || activeOrder?._id;
+    if (!idToCancel) {
+      localStorage.removeItem("activeOrderId");
+      setActiveOrder(null);
+      return;
+    }
+
     try {
-      const res = await fetch(`${API_URL}/orders/${orderId}/cancel`, {
+      const res = await fetch(`${API_URL}/orders/${idToCancel}/cancel`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
       });
@@ -139,6 +159,12 @@ function Home({ socket }) {
     } catch (error) {
       console.error("Error al cancelar la orden:", error);
     }
+  };
+
+  // Manejador para seleccionar conductor directamente en el mapa
+  const handleDriverSelect = (driver) => {
+    setSelectedDriver(driver);
+    setShowMap(false); // Ocultar mapa tras seleccionar para enfocarse en el formulario
   };
 
   // 4. CARGA DE COMERCIOS SEGÚN CATEGORÍA
@@ -205,120 +231,126 @@ function Home({ socket }) {
         </div>
       </header>
 
-      {/* 2. MENÚ LATERAL (DRAWER) */}
+      {/* 2. MENÚ DESPLEGABLE ULTRA-COMPACTO */}
       {menuAbierto && (
-        <div
-          onClick={() => setMenuAbierto(false)}
-          className="absolute inset-0 bg-black/60 backdrop-blur-xs z-30 transition-all duration-300"
-        />
-      )}
+        <>
+          {/* Capa invisible para cerrar al hacer clic afuera */}
+          <div
+            onClick={() => setMenuAbierto(false)}
+            className="fixed inset-0 z-40 bg-transparent"
+          />
 
-      <aside
-        className={`absolute top-0 right-0 h-full w-72 bg-slate-50 z-40 shadow-2xl flex flex-col justify-between transition-transform duration-300 ease-out ${
-          menuAbierto ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
-        <div className="flex flex-col h-full justify-between">
-          <div>
-            <div className="bg-gradient-to-br from-orange-500 to-orange-600 p-5 text-white relative rounded-b-3xl shadow-md">
-              <button
-                onClick={() => setMenuAbierto(false)}
-                className="absolute top-4 right-4 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full w-8 h-8 flex items-center justify-center text-sm font-bold transition-all cursor-pointer"
-              >
-                ✕
-              </button>
-
-              <div className="flex items-center gap-3 mt-2">
-                <div className="w-12 h-12 bg-white text-orange-500 rounded-full flex items-center justify-center text-xl font-black shadow">
+          <aside
+            className={`absolute top-16 right-4 sm:right-6 z-50 w-64 bg-white rounded-2xl shadow-xl border border-gray-100 overflow-hidden transition-all duration-200 ease-out origin-top-right transform ${
+              menuAbierto
+                ? "opacity-100 scale-100 translate-y-0"
+                : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
+            }`}
+          >
+            {/* Encabezado ultrafino */}
+            <div className="bg-gradient-to-br from-orange-500 to-orange-600 px-3 py-2.5 text-white relative flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 bg-white text-orange-500 rounded-full flex items-center justify-center text-xs font-black shadow-xs">
                   IE
                 </div>
 
                 <div>
-                  <h3 className="font-semibold text-lg leading-tight">
+                  <h3 className="font-semibold text-xs leading-tight">
                     Inírida Express
                   </h3>
-                  <p className="text-sm text-white/80">Menú de opciones</p>
+                  <p className="text-[10px] text-white/80">Menú de opciones</p>
                 </div>
               </div>
-            </div>
 
-            <nav className="p-5 space-y-3 bg-gray-50">
               <button
                 onClick={() => setMenuAbierto(false)}
-                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+                className="bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold transition-all cursor-pointer"
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                ✕
+              </button>
+            </div>
+
+            {/* Lista de navegación súper compacta */}
+            <nav className="p-1.5 divide-y divide-gray-100">
+              <button
+                onClick={() => setMenuAbierto(false)}
+                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-orange-50/60 transition-colors text-left cursor-pointer group"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs p-1 bg-orange-100 text-orange-500 rounded-md">
                     🏠
                   </span>
                   <div>
-                    <p className="font-semibold text-gray-800 text-sm">
+                    <p className="font-semibold text-gray-800 text-xs leading-tight">
                       Inicio
                     </p>
-                    <p className="text-xs text-gray-500">
-                      Ver comercios disponibles
-                    </p>
+                    <p className="text-[9px] text-gray-400">Ver comercios</p>
                   </div>
                 </div>
-                <span className="text-gray-400 text-lg">›</span>
+                <span className="text-gray-400 text-xs group-hover:translate-x-0.5 transition-transform">
+                  ›
+                </span>
               </button>
 
               <button
                 onClick={irAFormularioComercio}
-                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-orange-50/60 transition-colors text-left cursor-pointer group"
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs p-1 bg-orange-100 text-orange-500 rounded-md">
                     💼
                   </span>
                   <div>
-                    <p className="font-semibold text-gray-800 text-sm">
+                    <p className="font-semibold text-gray-800 text-xs leading-tight">
                       ¿Quieres vender?
                     </p>
-                    <p className="text-xs text-gray-500">
-                      Registra tu negocio o local
+                    <p className="text-[9px] text-gray-400">
+                      Registra tu negocio
                     </p>
                   </div>
                 </div>
-                <span className="text-orange-500 font-bold text-lg">›</span>
+                <span className="text-orange-500 font-bold text-xs group-hover:translate-x-0.5 transition-transform">
+                  ›
+                </span>
               </button>
 
               <button
                 onClick={irAFormularioRepartidor}
-                className="w-full flex items-center justify-between p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md hover:scale-[1.02] transition-all duration-200 text-left cursor-pointer"
+                className="w-full flex items-center justify-between p-2 rounded-lg hover:bg-orange-50/60 transition-colors text-left cursor-pointer group"
               >
-                <div className="flex items-center gap-3">
-                  <span className="text-lg p-2 bg-orange-100 text-orange-500 rounded-xl">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs p-1 bg-orange-100 text-orange-500 rounded-md">
                     🛵
                   </span>
                   <div>
-                    <p className="font-semibold text-gray-800 text-sm">
+                    <p className="font-semibold text-gray-800 text-xs leading-tight">
                       ¡Trabaja con nosotros!
                     </p>
-                    <p className="text-xs text-gray-500">
-                      Súmate como domiciliario
-                    </p>
+                    <p className="text-[9px] text-gray-400">Sé repartidor</p>
                   </div>
                 </div>
-                <span className="text-orange-500 font-bold text-lg">›</span>
+                <span className="text-orange-500 font-bold text-xs group-hover:translate-x-0.5 transition-transform">
+                  ›
+                </span>
               </button>
             </nav>
-          </div>
 
-          <div className="p-5 border-t border-gray-100 bg-white space-y-3">
-            <button
-              onClick={cerrarSesion}
-              className="w-full py-3 rounded-xl bg-red-50 text-red-500 font-semibold hover:bg-red-100 hover:scale-[1.01] transition-all duration-200 flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <span>🚪</span> Cerrar sesión
-            </button>
+            {/* Footer compacto */}
+            <div className="p-1.5 border-t border-gray-100 bg-gray-50/50 space-y-1">
+              <button
+                onClick={cerrarSesion}
+                className="w-full py-1.5 rounded-lg bg-red-50 text-red-500 font-semibold hover:bg-red-100 transition-colors flex items-center justify-center gap-1 cursor-pointer text-[11px]"
+              >
+                <span>🚪</span> Cerrar sesión
+              </button>
 
-            <p className="text-[11px] text-center text-gray-400 font-medium">
-              Inírida Express v1.0 • 2026
-            </p>
-          </div>
-        </div>
-      </aside>
+              <p className="text-[8px] text-center text-gray-400 font-medium">
+                Inírida Express v1.0 • 2026
+              </p>
+            </div>
+          </aside>
+        </>
+      )}
 
       {/* 3. CUERPO PRINCIPAL */}
       <div className="p-4 flex flex-col gap-4 flex-1 pb-24">
@@ -374,22 +406,34 @@ function Home({ socket }) {
                         ? "Sitios de Turismo"
                         : "Servicios de Mandados"}
             </span>
-            <span className="text-[11px] bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-md">
-              {categoriaSeleccionada === "motocarro"
-                ? "Mapa Radar Activo"
-                : `${comerciosFiltrados.length} opciones`}
-            </span>
+
+            {/* Botón interactivo para conmutar Mapa / Contador de opciones */}
+            {categoriaSeleccionada === "motocarro" ? (
+              <button
+                type="button"
+                onClick={() => setShowMap(!showMap)}
+                className="text-[11px] bg-orange-50 hover:bg-orange-100 text-orange-600 font-bold px-2.5 py-1 rounded-lg border border-orange-200 transition-all flex items-center gap-1 cursor-pointer"
+              >
+                <span>{showMap ? "🗺️ Ocultar Mapa" : "📡 Ver Mapa Radar"}</span>
+              </button>
+            ) : (
+              <span className="text-[11px] bg-orange-50 text-orange-600 font-bold px-2 py-0.5 rounded-md">
+                {`${comerciosFiltrados.length} opciones`}
+              </span>
+            )}
           </h2>
 
           {categoriaSeleccionada === "motocarro" ? (
             <div className="space-y-4">
-              {/* Mapa Radar interactivo */}
-              <div className="h-60 rounded-2xl overflow-hidden shadow-sm border border-gray-200 relative">
-                <MapView
-                  socket={socket}
-                  onSelectDriver={(driver) => setSelectedDriver(driver)}
-                />
-              </div>
+              {/* Mapa Radar interactivo desplegable */}
+              {showMap && (
+                <div className="h-60 rounded-2xl overflow-hidden shadow-sm border border-gray-200 relative transition-all duration-300 animate-fadeIn">
+                  <MapView
+                    socket={socket}
+                    onSelectDriver={handleDriverSelect}
+                  />
+                </div>
+              )}
 
               {/* Formulario de carrera */}
               <MotocarroForm

@@ -2,9 +2,55 @@ import mongoose from "mongoose";
 import Order from "./Order.js";
 import Message from "./Message.js";
 import Driver from "./Driver.js";
+import User from "./User.js";
 
-// Helper de campos para popular conductor de forma segura (incluye ambos nombres de placa)
-const DRIVER_POPULATE_FIELDS = "name phone vehicleType vehiclePlate plate";
+// Helper de campos para popular conductor de forma segura (incluye todas las variantes posibles de placas y nombres)
+const DRIVER_POPULATE_FIELDS =
+  "name fullName phone vehicleType vehiclePlate plate plateNumber licensePlate vehicle model vehicleModel";
+
+// Helper interno para popular dinámicamente el conductor independientemente del modelo ref o ID
+const safePopulateDriver = async (orderDoc) => {
+  if (!orderDoc || !orderDoc.driver) return;
+
+  // 1. Si driver ya viene populado como objeto con datos
+  if (
+    typeof orderDoc.driver === "object" &&
+    orderDoc.driver !== null &&
+    !orderDoc.driver._id
+  ) {
+    return;
+  }
+
+  // 2. Si driver es un ObjectId o String
+  const driverId = orderDoc.driver._id || orderDoc.driver;
+  if (mongoose.Types.ObjectId.isValid(driverId)) {
+    try {
+      // Intentar popular normalmente según la ref del modelo
+      await orderDoc.populate("driver", DRIVER_POPULATE_FIELDS);
+
+      // Si el populate de mongoose devolvió null (por mismatch de ref o colección)
+      if (!orderDoc.driver) {
+        // Probar buscando manualmente en Driver y luego en User
+        let foundDriver = await Driver.findById(driverId)
+          .select(DRIVER_POPULATE_FIELDS)
+          .lean();
+        if (!foundDriver) {
+          foundDriver = await User.findById(driverId)
+            .select(DRIVER_POPULATE_FIELDS)
+            .lean();
+        }
+        if (foundDriver) {
+          orderDoc.driver = foundDriver;
+        }
+      }
+    } catch (e) {
+      console.warn(
+        "⚠️ Advertencia al popular driver dinámicamente:",
+        e.message,
+      );
+    }
+  }
+};
 
 // ==========================================
 // HELPER PARA GENERAR PIN SEGURO
@@ -70,8 +116,6 @@ export const createOrder = async (req, res) => {
     await newOrder.save();
 
     // 3. Poblado Seguro
-    let populatedOrder = newOrder.toObject();
-
     if (newOrder.store && mongoose.Types.ObjectId.isValid(newOrder.store)) {
       await newOrder.populate("store", "name address phone originCoords");
     }
@@ -86,7 +130,7 @@ export const createOrder = async (req, res) => {
       );
     }
 
-    populatedOrder = newOrder.toObject();
+    const populatedOrder = newOrder.toObject();
 
     // 4. Emisión por WebSockets
     const io = req.app.get("io");
@@ -126,13 +170,27 @@ export const getAvailableOrders = async (req, res) => {
       },
     })
       .populate("store", "name address phone originCoords")
-      .populate(
-        "customer",
-        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
-      )
       .sort({ createdAt: -1 });
 
-    res.json(orders);
+    // Popular cliente únicamente cuando 'customer' sea un ObjectId de Mongoose
+    const populatedOrders = await Promise.all(
+      orders.map(async (doc) => {
+        if (doc.customer && mongoose.Types.ObjectId.isValid(doc.customer)) {
+          try {
+            await doc.populate(
+              "customer",
+              "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+            );
+          } catch (e) {
+            console.warn("⚠️ No se pudo popular customer ObjectId:", e.message);
+          }
+        }
+        await safePopulateDriver(doc);
+        return doc.toObject();
+      }),
+    );
+
+    res.json(populatedOrders);
   } catch (error) {
     console.error("Error al obtener pedidos disponibles:", error);
 
@@ -198,10 +256,9 @@ export const createMessage = async (req, res) => {
 
     const io = req.app.get("io");
     if (io) {
+      // Emitir eventos manteniendo compatibilidad con ambos esquemas de salas
       io.to(orderId).emit("receive_message", newMessage);
       io.to(`order_${orderId}`).emit("receive_message", newMessage);
-      io.to(orderId).emit("newMessage", newMessage);
-      io.to(`order_${orderId}`).emit("newMessage", newMessage);
     }
 
     res.status(201).json(newMessage);
@@ -268,7 +325,7 @@ export const takeOrder = async (req, res) => {
         },
       },
       { driver: driverId, status: "on_the_way" },
-      { returnDocument: "after" },
+      { new: true },
     );
 
     if (!order) {
@@ -278,9 +335,8 @@ export const takeOrder = async (req, res) => {
       });
     }
 
-    // 3. Poblados seguros opcionales
-    let populatedOrder = order.toObject();
-
+    // 3. Poblados seguros obligatorios para devolver la info completa del conductor al cliente inmediatamente
+    let populatedOrder = order;
     try {
       if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
         await order.populate("store", "name address phone originCoords");
@@ -291,21 +347,24 @@ export const takeOrder = async (req, res) => {
           "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
         );
       }
-      if (order.driver && mongoose.Types.ObjectId.isValid(order.driver)) {
-        await order.populate("driver", DRIVER_POPULATE_FIELDS);
-      }
+      await safePopulateDriver(order);
       populatedOrder = order.toObject();
     } catch (popError) {
       console.warn(
         "⚠️ Error secundario al popular datos en takeOrder:",
         popError.message,
       );
+      populatedOrder = order.toObject();
     }
 
-    // 4. Notificar vía Sockets
+    // 4. Notificar vía Sockets a todas las salas relevantes
     const io = req.app.get("io");
     if (io) {
-      io.emit("order:taken", { orderId: order._id, driverId });
+      io.emit("order:taken", {
+        orderId: order._id,
+        driverId,
+        order: populatedOrder,
+      });
       io.to(`order_${order._id}`).emit("order:status_updated", populatedOrder);
       io.to(`order_${order._id}`).emit("orderUpdated", populatedOrder);
       io.emit("order_status_updated", populatedOrder);
@@ -330,8 +389,17 @@ export const takeOrder = async (req, res) => {
 export const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const status = req.body.status || "completed";
+    let status = req.body.status || "completed";
     const { pin } = req.body;
+
+    // Normalizar variantes de estados comunes
+    if (
+      status === "finalizada" ||
+      status === "finished" ||
+      status === "delivered"
+    ) {
+      status = "completed";
+    }
 
     const validStatuses = [
       "created",
@@ -349,13 +417,7 @@ export const updateOrderStatus = async (req, res) => {
       return res.status(400).json({ message: `Estado no válido: ${status}` });
     }
 
-    const order = await Order.findById(orderId)
-      .populate("store", "name address phone originCoords")
-      .populate(
-        "customer",
-        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
-      )
-      .populate("driver", DRIVER_POPULATE_FIELDS);
+    const order = await Order.findById(orderId);
 
     if (!order) {
       return res.status(404).json({
@@ -363,30 +425,46 @@ export const updateOrderStatus = async (req, res) => {
       });
     }
 
+    // Poblados seguros condicionales
+    if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
+      await order.populate("store", "name address phone originCoords");
+    }
+    if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+      await order.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+    }
+    await safePopulateDriver(order);
+
     if (status === "cancelled") {
       order.status = "cancelled";
       await order.save();
 
       const io = req.app.get("io");
       if (io) {
-        io.to(`order_${order._id}`).emit("order:status_updated", order);
-        io.to(`order_${order._id}`).emit("orderUpdated", order);
-        io.emit("order_status_updated", order);
+        io.to(`order_${order._id}`).emit(
+          "order:status_updated",
+          order.toObject(),
+        );
+        io.to(`order_${order._id}`).emit("orderUpdated", order.toObject());
+        io.emit("order_status_updated", order.toObject());
         io.emit("order:cancelled", { orderId: order._id });
       }
 
       return res.json({
         message: "Carrera/Solicitud cancelada exitosamente ❌",
-        order,
+        order: order.toObject(),
       });
     }
 
-    // Eximir del PIN a carreras de tipo transporte
+    // Eximir del PIN a carreras de tipo transporte / motocarro / pasajeros
     const isRide =
       order.serviceType === "ride" ||
       order.serviceType === "carrerita" ||
       order.serviceType === "pasajero" ||
-      order.serviceType === "motocarro";
+      order.serviceType === "motocarro" ||
+      !order.deliveryPin;
 
     if (status === "completed" && !isRide) {
       if (!pin) {
@@ -407,11 +485,13 @@ export const updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
+    const populatedResult = order.toObject();
+
     const io = req.app.get("io");
     if (io) {
-      io.to(`order_${order._id}`).emit("order:status_updated", order);
-      io.to(`order_${order._id}`).emit("orderUpdated", order);
-      io.emit("order_status_updated", order);
+      io.to(`order_${order._id}`).emit("order:status_updated", populatedResult);
+      io.to(`order_${order._id}`).emit("orderUpdated", populatedResult);
+      io.emit("order_status_updated", populatedResult);
     }
 
     res.json({
@@ -421,7 +501,7 @@ export const updateOrderStatus = async (req, res) => {
             ? "¡Carrera completada con éxito! 🏁"
             : "¡Servicio verificado y completado con éxito mediante PIN! 🏁"
           : `Estado actualizado a: ${status}`,
-      order,
+      order: populatedResult,
     });
   } catch (error) {
     console.error("Error al actualizar estado del servicio:", error);
@@ -452,32 +532,40 @@ export const sendCounterOffer = async (req, res) => {
       orderId,
       { $push: { counterOffers: newOffer } },
       { new: true },
-    )
-      .populate("store", "name address phone originCoords")
-      .populate(
-        "customer",
-        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
-      )
-      .populate("driver", DRIVER_POPULATE_FIELDS);
+    );
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
     }
+
+    // Poblados seguros
+    if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
+      await order.populate("store", "name address phone originCoords");
+    }
+    if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+      await order.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+    }
+    await safePopulateDriver(order);
+
+    const populatedResult = order.toObject();
 
     const io = req.app.get("io");
     if (io) {
       io.to(`order_${orderId}`).emit("counter_offer_received", {
         orderId,
         offer: newOffer,
-        order,
+        order: populatedResult,
       });
-      io.to(`order_${orderId}`).emit("orderUpdated", order);
-      io.emit("order_status_updated", order);
+      io.to(`order_${orderId}`).emit("orderUpdated", populatedResult);
+      io.emit("order_status_updated", populatedResult);
     }
 
     res.json({
       message: "Contraoferta enviada con éxito al cliente 📲",
-      order,
+      order: populatedResult,
     });
   } catch (error) {
     console.error("Error al enviar contraoferta:", error);
@@ -496,29 +584,37 @@ export const cancelOrder = async (req, res) => {
       orderId,
       { status: "cancelled" },
       { new: true },
-    )
-      .populate("store", "name address phone originCoords")
-      .populate(
-        "customer",
-        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
-      )
-      .populate("driver", DRIVER_POPULATE_FIELDS);
+    );
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
     }
 
+    // Poblados seguros
+    if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
+      await order.populate("store", "name address phone originCoords");
+    }
+    if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+      await order.populate(
+        "customer",
+        "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
+      );
+    }
+    await safePopulateDriver(order);
+
+    const populatedResult = order.toObject();
+
     const io = req.app.get("io");
     if (io) {
-      io.to(`order_${order._id}`).emit("order:status_updated", order);
-      io.to(`order_${order._id}`).emit("orderUpdated", order);
-      io.emit("order_status_updated", order);
+      io.to(`order_${order._id}`).emit("order:status_updated", populatedResult);
+      io.to(`order_${order._id}`).emit("orderUpdated", populatedResult);
+      io.emit("order_status_updated", populatedResult);
       io.emit("order:cancelled", { orderId: order._id });
     }
 
     res.json({
       message: "Carrera/Solicitud cancelada correctamente ❌",
-      order,
+      order: populatedResult,
     });
   } catch (error) {
     console.error("Error al cancelar la orden:", error);
@@ -551,7 +647,10 @@ export const rateOrder = async (req, res) => {
     order.ratingComment = ratingComment || "";
     await order.save();
 
-    res.json({ message: "¡Gracias por tu calificación! ⭐", order });
+    res.json({
+      message: "¡Gracias por tu calificación! ⭐",
+      order: order.toObject(),
+    });
   } catch (error) {
     console.error("Error al calificar servicio:", error);
     res
@@ -571,15 +670,14 @@ export const getActiveDriverOrder = async (req, res) => {
       return res.status(200).json(null);
     }
 
-    if (!mongoose.Types.ObjectId.isValid(driverId)) {
-      console.warn(
-        `⚠️ driverId no válido recibido en getActiveDriverOrder: ${driverId}`,
-      );
-      return res.status(200).json(null);
-    }
-
+    // Búsqueda flexible por ObjectId o por String exacto
     const activeOrder = await Order.findOne({
-      driver: driverId,
+      $or: [
+        { driver: driverId },
+        ...(mongoose.Types.ObjectId.isValid(driverId)
+          ? [{ driver: new mongoose.Types.ObjectId(driverId) }]
+          : []),
+      ],
       status: {
         $in: [
           "assigned",
@@ -590,13 +688,13 @@ export const getActiveDriverOrder = async (req, res) => {
           "on_the_way",
         ],
       },
-    })
-      .populate("store", "name address phone originCoords")
-      .populate("driver", DRIVER_POPULATE_FIELDS);
+    }).populate("store", "name address phone originCoords");
 
     if (!activeOrder) {
       return res.status(200).json(null);
     }
+
+    await safePopulateDriver(activeOrder);
 
     let populatedOrder = activeOrder.toObject();
     if (
@@ -628,13 +726,16 @@ export const getOrderById = async (req, res) => {
       return res.status(400).json({ message: "ID de orden no válido." });
     }
 
-    const order = await Order.findById(orderId)
-      .populate("store", "name address phone originCoords")
-      .populate("driver", DRIVER_POPULATE_FIELDS);
+    const order = await Order.findById(orderId).populate(
+      "store",
+      "name address phone originCoords",
+    );
 
     if (!order) {
       return res.status(404).json({ message: "Solicitud no encontrada." });
     }
+
+    await safePopulateDriver(order);
 
     let populatedOrder = order.toObject();
     if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
@@ -740,29 +841,39 @@ export const respondCounterOffer = async (req, res) => {
 
       await order.save();
 
-      const populatedOrder = await Order.findById(order._id)
-        .populate("store", "name address phone originCoords")
-        .populate(
+      // Poblados seguros (Aseguramos popular conductor tras asignar driverId)
+      if (order.store && mongoose.Types.ObjectId.isValid(order.store)) {
+        await order.populate("store", "name address phone originCoords");
+      }
+      if (order.customer && mongoose.Types.ObjectId.isValid(order.customer)) {
+        await order.populate(
           "customer",
           "name phone address pickupAddress notes destinationCoords originAddress destinationAddress",
-        )
-        .populate("driver", DRIVER_POPULATE_FIELDS);
+        );
+      }
+      await safePopulateDriver(order);
+
+      const populatedResult = order.toObject();
 
       const io = req.app.get("io");
       if (io) {
         io.to(`order_${orderId}`).emit("counter_offer_accepted", {
           orderId,
-          order: populatedOrder,
+          order: populatedResult,
         });
-        io.to(`order_${orderId}`).emit("order:status_updated", populatedOrder);
-        io.to(`order_${orderId}`).emit("orderUpdated", populatedOrder);
-        io.emit("order_status_updated", populatedOrder);
-        io.emit("order:taken", { orderId: order._id, driverId });
+        io.to(`order_${orderId}`).emit("order:status_updated", populatedResult);
+        io.to(`order_${orderId}`).emit("orderUpdated", populatedResult);
+        io.emit("order_status_updated", populatedResult);
+        io.emit("order:taken", {
+          orderId: order._id,
+          driverId,
+          order: populatedResult,
+        });
       }
 
       return res.json({
         message: "¡Contraoferta aceptada! El servicio ha sido asignado. 🚕",
-        order: populatedOrder,
+        order: populatedResult,
       });
     } else if (action === "reject") {
       if (order.counterOffers && order.counterOffers.length > 0) {
@@ -784,7 +895,10 @@ export const respondCounterOffer = async (req, res) => {
         });
       }
 
-      return res.json({ message: "Contraoferta rechazada.", order });
+      return res.json({
+        message: "Contraoferta rechazada.",
+        order: order.toObject(),
+      });
     } else {
       return res.status(400).json({ message: "Acción no válida." });
     }

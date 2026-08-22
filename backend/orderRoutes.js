@@ -18,7 +18,7 @@ import {
 const router = express.Router();
 
 /* ==========================================================================
-   1. Rutas Estáticas y Específicas (Deben ir ANTES de /:orderId)
+   1. Rutas Estáticas y Específicas (DEBEN ir ANTES de /:orderId)
    ========================================================================== */
 
 // Crear un nuevo pedido / carrera
@@ -31,12 +31,15 @@ router.get("/available", getAvailableOrders);
 router.get("/driver-active/:driverId", getActiveDriverOrder);
 router.get("/active/driver/:driverId", getActiveDriverOrder);
 
-// Aceptar / tomar carrera por el conductor (Soporta /take/:orderId)
+// Aceptar / tomar carrera por el conductor
 router.post("/take/:orderId", takeOrder);
 
 /* ==========================================================================
    2. Rutas Parametrizadas por Pedido (/:orderId/...)
    ========================================================================== */
+
+// Aceptar carrera directamente por el conductor (Alias para /take/:orderId)
+router.post("/:orderId/accept", takeOrder);
 
 // Obtener un pedido por ID (Polling / Detalles)
 router.get("/:orderId", getOrderById);
@@ -44,9 +47,6 @@ router.get("/:orderId", getOrderById);
 // Historial y envío de mensajes del chat (HTTP REST Fallback + Polling)
 router.get("/:orderId/messages", getOrderMessages);
 router.post("/:orderId/messages", createMessage);
-
-// Aceptar carrera directamente por el conductor (Ruta alternativa)
-router.post("/:orderId/accept", takeOrder);
 
 // Enviar y responder contraofertas de precio
 router.post("/:orderId/counter-offer", sendCounterOffer);

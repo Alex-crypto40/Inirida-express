@@ -18,8 +18,8 @@ function MotocarroForm({
   const [origen, setOrigen] = useState("");
   const [destino, setDestino] = useState("");
   const [comentarios, setComentarios] = useState("");
-  const [gpsCoords, setGpsCoords] = useState(null); // Guarda objeto con lat/lng o link
-  const [rawCoords, setRawCoords] = useState(null); // Para pasar objeto { lat, lng } directo
+  const [gpsCoords, setGpsCoords] = useState(null);
+  const [rawCoords, setRawCoords] = useState(null);
 
   const [loadingGps, setLoadingGps] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -131,27 +131,22 @@ function MotocarroForm({
     localStorage.setItem("userPhone", phoneClean);
     if (nombre.trim()) localStorage.setItem("userName", nombre.trim());
 
-    // Link de GPS adicional en notas
     const notaFinal = gpsCoords
       ? `${comentarios ? comentarios + " | " : ""}Link GPS: ${gpsCoords}`
       : comentarios || "";
 
-    // PAYLOAD OPTIMIZADO Y COMPATIBLE CON EL BACKEND DE INÍRIDA EXPRESS
     const pedidoMotocarro = {
       serviceType: "ride",
       isMandado: false,
       targetDriverId: selectedDriver ? selectedDriver.driverId : null,
 
-      // Datos directos de ubicación (utilizados para el dashboard del conductor)
       originAddress: origen.trim(),
       destinationAddress: destino.trim(),
       originCoords: rawCoords || null,
 
-      // Compatibilidad con campos raíz legacy
       origen: origen.trim(),
       destino: destino.trim(),
 
-      // Información de contacto
       customerName: nombre.trim() || "Cliente Motocarro",
       customerPhone: phoneClean,
 
@@ -186,6 +181,7 @@ function MotocarroForm({
       if (res.ok) {
         const createdOrder = data.order || data;
         if (createdOrder?._id) {
+          // Guardamos la nueva orden activa
           localStorage.setItem("activeOrderId", createdOrder._id);
         }
 
@@ -307,7 +303,6 @@ function MotocarroForm({
                 </button>
               </div>
 
-              {/* Mensaje de apoyo visual si presiona GPS */}
               {origen.includes("GPS") && (
                 <p className="text-[9px] text-orange-600 font-bold mt-1 ml-6 animate-fadeIn">
                   💡 Agrega una referencia si deseas (Ej: {origen} - Frente al
@@ -331,7 +326,7 @@ function MotocarroForm({
               />
             </div>
 
-            {/* Chips Rápidos de Destinos Frecuentes */}
+            {/* Chips Rápidos */}
             <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
               {[
                 "Centro",
@@ -353,7 +348,7 @@ function MotocarroForm({
             </div>
           </div>
 
-          {/* Tarjeta Informativa de Pago y Desplegable Pro de Tarifas */}
+          {/* Tarjeta Informativa de Pago */}
           <div className="bg-gradient-to-br from-slate-50 to-orange-50/30 border border-orange-100 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
@@ -368,7 +363,6 @@ function MotocarroForm({
                 </div>
               </div>
 
-              {/* BOTÓN DESPLEGABLE PRO */}
               <button
                 type="button"
                 onClick={() => setShowTarifasGuide(!showTarifasGuide)}
@@ -378,10 +372,8 @@ function MotocarroForm({
               </button>
             </div>
 
-            {/* GUÍA DESPLEGABLE PRO CON AVISO DE PASAJEROS Y TABLA DE TARIFAS */}
             {showTarifasGuide && (
               <div className="pt-2 border-t border-orange-200/60 space-y-2 animate-fadeIn">
-                {/* 👥 ACLARACIÓN DE COBRO POR PASAJERO */}
                 <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-2 flex items-start gap-2">
                   <span className="text-xs shrink-0">👥</span>
                   <p className="text-[10px] text-amber-900 leading-tight">
