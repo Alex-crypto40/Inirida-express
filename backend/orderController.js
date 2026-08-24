@@ -909,3 +909,35 @@ export const respondCounterOffer = async (req, res) => {
       .json({ message: "Error interno al procesar la respuesta." });
   }
 };
+
+// ==========================================
+// 13. OBTENER HISTORIAL DE PEDIDOS DE UN CLIENTE
+// ==========================================
+export const getCustomerOrders = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+
+    if (!customerId || customerId === "undefined" || customerId === "null") {
+      return res.status(200).json([]);
+    }
+
+    // Búsqueda por ObjectId (si es válido) o por campo de teléfono/string en la orden
+    const query = mongoose.Types.ObjectId.isValid(customerId)
+      ? { $or: [{ customer: customerId }, { "customer.phone": customerId }] }
+      : { "customer.phone": customerId };
+
+    const orders = await Order.find(query)
+      .sort({ createdAt: -1 })
+      .populate("driver", "name phone vehicleType vehiclePlate avatar photo")
+      .populate("store", "name address phone")
+      .lean();
+
+    return res.status(200).json(orders || []);
+  } catch (error) {
+    console.error("❌ Error al obtener historial del cliente:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Error al recuperar el historial de pedidos.",
+    });
+  }
+};

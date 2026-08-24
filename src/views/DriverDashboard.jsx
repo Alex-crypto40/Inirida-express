@@ -796,15 +796,17 @@ export default function DriverDashboard({
             <div className="p-3.5 flex-1 overflow-y-auto space-y-3 text-xs bg-slate-950/40">
               {chatMessages.filter((msg) => {
                 const targetClean = (
-                  chatTargetOrder._id ||
-                  chatTargetOrder.id ||
+                  chatTargetOrder?._id ||
+                  chatTargetOrder?.id ||
                   ""
                 )
                   .toString()
                   .replace(/^order_/, "");
+
                 const msgClean = (msg.orderId || "")
                   .toString()
                   .replace(/^order_/, "");
+
                 return msgClean === targetClean;
               }).length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 space-y-1 my-auto">
@@ -817,19 +819,23 @@ export default function DriverDashboard({
                 chatMessages
                   .filter((msg) => {
                     const targetClean = (
-                      chatTargetOrder._id ||
-                      chatTargetOrder.id ||
+                      chatTargetOrder?._id ||
+                      chatTargetOrder?.id ||
                       ""
                     )
                       .toString()
                       .replace(/^order_/, "");
+
                     const msgClean = (msg.orderId || "")
                       .toString()
                       .replace(/^order_/, "");
+
                     return msgClean === targetClean;
                   })
                   .map((msg, idx) => {
-                    // Detección robusta del rol
+                    // ================================================================
+                    // DETECCIÓN ROBUSTA DEL ROL
+                    // ================================================================
                     const rawRole = (
                       msg.senderType ||
                       msg.sender ||
@@ -837,11 +843,15 @@ export default function DriverDashboard({
                       ""
                     )
                       .toString()
+                      .trim()
                       .toLowerCase();
+
                     const isDriver =
                       rawRole === "driver" || rawRole === "conductor";
 
-                    // Formatear la hora
+                    // ================================================================
+                    // HORA DEL MENSAJE
+                    // ================================================================
                     const formattedTime = msg.timestamp
                       ? new Date(msg.timestamp).toLocaleTimeString([], {
                           hour: "2-digit",
@@ -856,18 +866,31 @@ export default function DriverDashboard({
 
                     return (
                       <div
-                        key={idx}
-                        className={`flex flex-col ${
-                          isDriver ? "items-end" : "items-start"
+                        key={
+                          msg._id ||
+                          msg.id ||
+                          `${msg.timestamp || Date.now()}-${idx}`
+                        }
+                        className={`w-full flex flex-col ${
+                          isDriver ? "items-start" : "items-end"
                         }`}
                       >
-                        {/* Header del mensaje: Nombre + Badge */}
-                        <div className="flex items-center space-x-1.5 mb-1 text-[10px]">
+                        {/* ============================================================
+                ENCABEZADO DEL MENSAJE
+                CONDUCTOR = IZQUIERDA
+                CLIENTE   = DERECHA
+               ============================================================ */}
+                        <div
+                          className={`flex items-center gap-1.5 mb-1 text-[10px] ${
+                            isDriver ? "justify-start" : "justify-end"
+                          }`}
+                        >
                           <span className="font-bold text-slate-300">
                             {isDriver
                               ? "Conductor"
-                              : msg.senderName || "Cliente General"}
+                              : msg.senderName || "Cliente"}
                           </span>
+
                           <span
                             className={`px-1.5 py-0.5 rounded text-[9px] font-semibold border ${
                               isDriver
@@ -879,15 +902,33 @@ export default function DriverDashboard({
                           </span>
                         </div>
 
-                        {/* Burbuja del mensaje */}
+                        {/* ============================================================
+                BURBUJA
+                CONDUCTOR = IZQUIERDA
+                CLIENTE   = DERECHA
+               ============================================================ */}
                         <div
                           className={`max-w-[82%] p-2.5 rounded-2xl text-[11px] leading-snug shadow-sm ${
                             isDriver
-                              ? "bg-amber-500 text-slate-950 font-medium rounded-tr-none"
-                              : "bg-slate-800 text-slate-100 border border-slate-700/70 rounded-tl-none"
+                              ? `
+                    bg-amber-500
+                    text-slate-950
+                    font-medium
+                    rounded-tl-none
+                  `
+                              : `
+                    bg-slate-800
+                    text-slate-100
+                    border border-slate-700/70
+                    rounded-tr-none
+                  `
                           }`}
                         >
-                          <p>{msg.text || msg.message}</p>
+                          <p className="whitespace-pre-wrap break-words">
+                            {msg.text || msg.message}
+                          </p>
+
+                          {/* Hora */}
                           <span
                             className={`block text-[9px] mt-1 text-right font-mono ${
                               isDriver ? "text-slate-800/80" : "text-slate-400"
@@ -900,6 +941,7 @@ export default function DriverDashboard({
                     );
                   })
               )}
+
               <div ref={chatEndRef} />
             </div>
 

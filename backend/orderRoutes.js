@@ -3,6 +3,7 @@ import {
   createOrder,
   getAvailableOrders,
   getActiveDriverOrder,
+  getCustomerOrders, // <-- AÑADIDO
   getOrderById,
   getOrderMessages,
   createMessage,
@@ -30,6 +31,9 @@ router.get("/available", getAvailableOrders);
 // Obtener carrera activa del conductor (Soporta ambas estructuras de URL)
 router.get("/driver-active/:driverId", getActiveDriverOrder);
 router.get("/active/driver/:driverId", getActiveDriverOrder);
+
+// Obtener historial de pedidos/carreras de un cliente (NUEVO)
+router.get("/customer/:customerId", getCustomerOrders);
 
 // Aceptar / tomar carrera por el conductor
 router.post("/take/:orderId", takeOrder);
