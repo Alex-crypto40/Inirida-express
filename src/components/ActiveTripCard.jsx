@@ -21,13 +21,28 @@ export default function ActiveTripCard({
   const [isMinimized, setIsMinimized] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
-  // Normalización: Si entra un objeto único vía activeOrder, lo volvemos un array
-  const ordersList =
+  // Estados de Cancelado o Finalizado a omitir
+  const IGNORED_STATUSES = [
+    "cancelled",
+    "canceled",
+    "cancelado",
+    "completed",
+    "completado",
+    "rejected",
+    "rechazado",
+  ];
+
+  // Normalización + Filtro: Descartamos cualquier orden cancelada o completada
+  const rawOrders =
     Array.isArray(activeOrders) && activeOrders.length > 0
       ? activeOrders
       : activeOrder
         ? [activeOrder]
         : [];
+
+  const ordersList = rawOrders.filter(
+    (ord) => !IGNORED_STATUSES.includes((ord?.status || "").toLowerCase()),
+  );
 
   // Estados de Arrastre (Draggable)
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -41,6 +56,7 @@ export default function ActiveTripCard({
     }
   }, [ordersList.length, selectedIndex]);
 
+  // Si no hay órdenes activas válidas, se oculta la tarjeta por completo
   if (ordersList.length === 0) return null;
 
   // Orden actualmente seleccionada en las pestañas
@@ -255,7 +271,7 @@ export default function ActiveTripCard({
 
             <button
               type="button"
-              onClick={() => onOpenChat(currentOrder)}
+              onClick={() => onOpenChat && onOpenChat(currentOrder)}
               className="bg-slate-800 hover:bg-slate-700 text-amber-400 p-1.5 rounded-lg text-xs flex items-center space-x-1 border border-amber-500/20 transition"
               title="Chat con el usuario"
             >

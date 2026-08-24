@@ -44,9 +44,16 @@ export default function OrderStatusWidget({
 
   // Sincronizar estado cuando se recibe una nueva orden vía props
   useEffect(() => {
-    if (initialOrder && initialOrder._id) {
+    if (
+      initialOrder &&
+      initialOrder._id &&
+      initialOrder.status !== "cancelled"
+    ) {
       setActiveOrder(initialOrder);
       localStorage.setItem("activeOrderId", initialOrder._id);
+    } else if (initialOrder && initialOrder.status === "cancelled") {
+      setActiveOrder(null);
+      localStorage.removeItem("activeOrderId");
     }
   }, [initialOrder]);
 
@@ -88,9 +95,11 @@ export default function OrderStatusWidget({
             localStorage.setItem("activeOrderId", foundOrder._id);
           } else {
             localStorage.removeItem("activeOrderId");
+            setActiveOrder(null);
           }
         } else {
           localStorage.removeItem("activeOrderId");
+          setActiveOrder(null);
         }
       } catch (error) {
         console.error("Error al recuperar orden activa:", error);
@@ -120,6 +129,12 @@ export default function OrderStatusWidget({
         updatedOrder._id || updatedOrder.orderId || updatedOrder.id;
 
       if (receivedId === orderId || !receivedId) {
+        if (updatedOrder.status === "cancelled") {
+          localStorage.removeItem("activeOrderId");
+          setActiveOrder(null);
+          return;
+        }
+
         setActiveOrder((prev) => {
           const nextState = {
             ...prev,
@@ -138,7 +153,7 @@ export default function OrderStatusWidget({
 
     const handleOrderCancelled = (data) => {
       const cancelledId = data?._id || data?.orderId || data?.id || data;
-      if (cancelledId === orderId) {
+      if (cancelledId === orderId || !cancelledId) {
         localStorage.removeItem("activeOrderId");
         setActiveOrder(null);
       }
@@ -243,7 +258,7 @@ export default function OrderStatusWidget({
 
   const isCompleted = status === "completed";
 
-  // OBTENCIÓN ROBUSTA DE CONDUCTOR Y VEHÍCULO BASADA EN TU MODELO DE BASE DE DATOS
+  // OBTENCIÓN ROBUSTA DE CONDUCTOR Y VEHÍCULO
   const driverObj =
     typeof activeOrder.driver === "object"
       ? activeOrder.driver
@@ -260,7 +275,6 @@ export default function OrderStatusWidget({
     activeCounterOffer?.driverName ||
     "Conductor Asignado";
 
-  // En la DB del conductor la propiedad exacta es vehiclePlate
   const displayPlate =
     driverObj?.vehiclePlate ||
     driverObj?.plateNumber ||
@@ -275,7 +289,6 @@ export default function OrderStatusWidget({
     activeOrder?.placa ||
     "Sin placa";
 
-  // En la DB del conductor la propiedad exacta es vehicleType
   const displayVehicleType =
     driverObj?.vehicleType ||
     driverObj?.vehicle?.vehicleType ||
@@ -320,13 +333,20 @@ export default function OrderStatusWidget({
     activeOrder.customer?.notes ||
     "Sin especificar";
 
-  // Handlers
+  // HANDLER DE CANCELACIÓN AJUSTADO
   const handleCancelOrder = async () => {
     if (!window.confirm("¿Deseas cancelar la solicitud de motocarro?")) return;
 
+    const currentId = activeOrder._id;
+
+    // Limpieza inmediata local para desaparecer el widget al instante
+    localStorage.removeItem("activeOrderId");
+    setActiveOrder(null);
+    if (onCancelOrder) onCancelOrder(currentId);
+
     setLoadingAction(true);
     try {
-      const res = await fetch(`${API_URL}/orders/${activeOrder._id}/status`, {
+      const res = await fetch(`${API_URL}/orders/${currentId}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -335,16 +355,12 @@ export default function OrderStatusWidget({
         }),
       });
 
-      if (res.ok) {
-        localStorage.removeItem("activeOrderId");
-        if (onCancelOrder) onCancelOrder(activeOrder._id);
-        setActiveOrder(null);
-      } else {
+      if (!res.ok) {
         const data = await res.json();
-        alert(data.message || "No se pudo cancelar la carrera.");
+        console.warn("Respuesta del servidor al cancelar:", data.message);
       }
-    } catch {
-      alert("Error de conexión al cancelar.");
+    } catch (err) {
+      console.error("Error de conexión al cancelar:", err);
     } finally {
       setLoadingAction(false);
     }
