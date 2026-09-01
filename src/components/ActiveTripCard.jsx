@@ -8,15 +8,14 @@ import {
   MapPin,
   Navigation,
   CheckCircle,
-  MapPinCheck,
 } from "lucide-react";
 
 export default function ActiveTripCard({
-  activeOrders = [], // Soporta array de hasta 2 carreras
+  activeOrders = [], // Array de hasta 2 carreras
   activeOrder = null, // Retrocompatibilidad para objeto único
   onUpdateStatus,
   onOpenChat,
-  loading,
+  loading = false,
 }) {
   const [isMinimized, setIsMinimized] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -32,7 +31,7 @@ export default function ActiveTripCard({
     "rechazado",
   ];
 
-  // Normalización + Filtro: Descartamos cualquier orden cancelada o completada
+  // Normalización + Filtro de órdenes
   const rawOrders =
     Array.isArray(activeOrders) && activeOrders.length > 0
       ? activeOrders
@@ -40,53 +39,48 @@ export default function ActiveTripCard({
         ? [activeOrder]
         : [];
 
-  const ordersList = rawOrders.filter(
-    (ord) => !IGNORED_STATUSES.includes((ord?.status || "").toLowerCase()),
-  );
+  const ordersList = rawOrders.filter((ord) => {
+    const st = (ord?.status || "").toString().toLowerCase().trim();
+    return !IGNORED_STATUSES.includes(st);
+  });
 
   // Estados de Arrastre (Draggable)
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
   const dragRef = useRef({ startX: 0, startY: 0, initialX: 0, initialY: 0 });
 
-  // Garantizar que selectedIndex no quede fuera de rango
+  // Ajuste de índice si se completa/cancela una carrera
   useEffect(() => {
     if (selectedIndex >= ordersList.length && ordersList.length > 0) {
       setSelectedIndex(Math.max(0, ordersList.length - 1));
     }
   }, [ordersList.length, selectedIndex]);
 
-  // Si no hay órdenes activas válidas, se oculta la tarjeta por completo
   if (ordersList.length === 0) return null;
 
-  // Orden actualmente seleccionada en las pestañas
   const currentOrder = ordersList[selectedIndex] || ordersList[0];
-  const orderId = currentOrder?._id || currentOrder?.id;
 
-  // Extracción segura de datos de la orden seleccionada
-  const item = currentOrder?.items?.[0] || {};
+  // Extracción robusta del ID de la orden activa
+  const orderId =
+    currentOrder?._id ||
+    currentOrder?.id ||
+    currentOrder?.orderId ||
+    currentOrder?.order?._id ||
+    currentOrder?.order?.id;
 
+  // Propiedades unificadas
   const originText =
-    item.origen ||
-    item.origin ||
-    item.pickupAddress ||
-    item.originAddress ||
-    currentOrder?.origen ||
-    currentOrder?.origin ||
     currentOrder?.pickupAddress ||
-    currentOrder?.originAddress ||
+    currentOrder?.pickupLocation?.address ||
+    currentOrder?.origen ||
+    currentOrder?.items?.[0]?.origen ||
     "Origen no especificado";
 
   const destinationText =
-    item.detalle ||
-    item.destino ||
-    item.destination ||
-    item.dropoffAddress ||
-    item.description ||
-    currentOrder?.detalle ||
-    currentOrder?.destino ||
-    currentOrder?.destination ||
     currentOrder?.destinationAddress ||
+    currentOrder?.dropoffLocation?.address ||
+    currentOrder?.destino ||
+    currentOrder?.items?.[0]?.detalle ||
     "Destino no especificado";
 
   const customerName =
@@ -94,16 +88,36 @@ export default function ActiveTripCard({
     currentOrder?.customerName ||
     currentOrder?.clientName ||
     currentOrder?.passengerName ||
-    "Cliente";
+    "Cliente General";
 
   const customerPhone =
     currentOrder?.customer?.phone ||
     currentOrder?.clientPhone ||
     currentOrder?.customerPhone;
 
-  const currentStatus = (currentOrder?.status || "").toLowerCase();
+  // Formateo del estado a castellano
+  const rawStatus = (currentOrder?.status || "en_camino").toLowerCase();
+  const formatStatus = (st) => {
+    if (
+      [
+        "on_the_way",
+        "on the way",
+        "assigned",
+        "accepted",
+        "in_progress",
+        "en_camino",
+        "en camino",
+      ].includes(st)
+    ) {
+      return "En Camino";
+    }
+    if (["arrived", "llegue", "at_pickup"].includes(st)) {
+      return "En Origen";
+    }
+    return st.replace(/_/g, " ");
+  };
 
-  // Control del arrastre (Draggable)
+  // Control del arrastre
   const handleDragStart = (clientX, clientY) => {
     setIsDragging(true);
     dragRef.current = {
@@ -125,11 +139,8 @@ export default function ActiveTripCard({
     });
   };
 
-  const handleDragEnd = () => {
-    setIsDragging(false);
-  };
+  const handleDragEnd = () => setIsDragging(false);
 
-  // Listeners globales para el arrastre
   useEffect(() => {
     const onMouseMove = (e) => handleDragMove(e.clientX, e.clientY);
     const onTouchMove = (e) => {
@@ -153,34 +164,25 @@ export default function ActiveTripCard({
     };
   }, [isDragging]);
 
-  // Manejadores de Estado
-  const isAcceptedStatus = [
-    "accepted",
-    "aceptado",
-    "assigned",
-    "asignado",
-    "assigned_driver",
-    "pending_driver",
-  ].includes(currentStatus);
+  // Apertura de chat segura con ID garantizado
+  const handleOpenChatSafe = () => {
+    if (!onOpenChat) return;
+    const safeOrder = {
+      ...currentOrder,
+      _id: orderId,
+      id: orderId,
+    };
+    onOpenChat(safeOrder);
+  };
 
-  const isArrivedStatus = ["arrived", "llegue", "llegué", "at_pickup"].includes(
-    currentStatus,
-  );
+  // Finalizar carrera directamente
+  const handleCompleteTrip = () => {
+    setPosition({ x: 0, y: 0 });
+    setSelectedIndex(0);
 
-  const isInProgressStatus = [
-    "in_progress",
-    "en_camino",
-    "en camino",
-    "inprogress",
-    "on_the_way",
-  ].includes(currentStatus);
-
-  const handleStatusUpdate = (nextStatus) => {
-    if (nextStatus === "COMPLETED") {
-      setPosition({ x: 0, y: 0 });
-      setSelectedIndex(0);
+    if (typeof onUpdateStatus === "function") {
+      onUpdateStatus(orderId || currentOrder, "COMPLETED");
     }
-    onUpdateStatus(nextStatus, orderId);
   };
 
   return (
@@ -192,7 +194,7 @@ export default function ActiveTripCard({
       className="fixed bottom-3 left-0 right-0 z-40 px-3 flex justify-center pointer-events-none select-none"
     >
       <div className="w-full max-w-md bg-slate-900/95 border border-amber-500/50 rounded-2xl shadow-2xl p-3.5 backdrop-blur-md max-h-[85vh] flex flex-col justify-between overflow-hidden pointer-events-auto">
-        {/* Grip Bar */}
+        {/* Drag Handle */}
         <div
           onMouseDown={(e) => handleDragStart(e.clientX, e.clientY)}
           onTouchStart={(e) => {
@@ -205,18 +207,18 @@ export default function ActiveTripCard({
           <GripHorizontal className="w-6 h-4 text-slate-500" />
         </div>
 
-        {/* PESTAÑAS SI HAY 2 CARRERAS ACTIVAS */}
+        {/* Pestañas para Múltiples Carreras */}
         {ordersList.length > 1 && (
           <div className="flex space-x-2 mb-2 p-1 bg-slate-950/80 rounded-xl border border-slate-800">
             {ordersList.map((ord, idx) => {
-              const shortCode = (ord._id || ord.id || `${idx + 1}`)
-                .toString()
-                .slice(-4);
+              const currentId =
+                ord._id || ord.id || ord.orderId || `${idx + 1}`;
+              const shortCode = currentId.toString().slice(-4);
               const isActive = idx === selectedIndex;
 
               return (
                 <button
-                  key={ord._id || ord.id || idx}
+                  key={currentId}
                   type="button"
                   onClick={() => setSelectedIndex(idx)}
                   className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center space-x-1.5 ${
@@ -241,7 +243,7 @@ export default function ActiveTripCard({
           </div>
         )}
 
-        {/* Cabecera */}
+        {/* Cabecera de la Tarjeta */}
         <div className="flex justify-between items-center pb-2 border-b border-slate-800">
           <div className="flex items-center space-x-2">
             <span className="relative flex h-2.5 w-2.5">
@@ -259,7 +261,7 @@ export default function ActiveTripCard({
             <button
               type="button"
               onClick={() => setIsMinimized(!isMinimized)}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg text-xs transition"
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 p-1.5 rounded-lg text-xs transition cursor-pointer"
               title={isMinimized ? "Expandir" : "Minimizar"}
             >
               {isMinimized ? (
@@ -271,9 +273,9 @@ export default function ActiveTripCard({
 
             <button
               type="button"
-              onClick={() => onOpenChat && onOpenChat(currentOrder)}
-              className="bg-slate-800 hover:bg-slate-700 text-amber-400 p-1.5 rounded-lg text-xs flex items-center space-x-1 border border-amber-500/20 transition"
-              title="Chat con el usuario"
+              onClick={handleOpenChatSafe}
+              className="bg-slate-800 hover:bg-slate-700 text-amber-400 p-1.5 rounded-lg text-xs flex items-center space-x-1 border border-amber-500/20 transition cursor-pointer"
+              title="Chat con el cliente"
             >
               <MessageSquare className="w-4 h-4" />
             </button>
@@ -281,8 +283,8 @@ export default function ActiveTripCard({
             {customerPhone && (
               <a
                 href={`tel:${customerPhone}`}
-                className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 p-1.5 rounded-lg text-xs border border-emerald-500/30 transition"
-                title="Llamar al usuario"
+                className="bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 p-1.5 rounded-lg text-xs border border-emerald-500/30 transition cursor-pointer"
+                title="Llamar al cliente"
               >
                 <Phone className="w-4 h-4" />
               </a>
@@ -290,20 +292,20 @@ export default function ActiveTripCard({
           </div>
         </div>
 
-        {/* Cuerpo (Detalles) */}
+        {/* Cuerpo / Información del Viaje */}
         {!isMinimized && (
           <div className="my-2 space-y-2">
-            <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="flex justify-between text-xs items-center px-1">
               <div>
                 <p className="text-[10px] text-slate-500 uppercase">Cliente</p>
-                <p className="font-semibold text-slate-200 truncate">
+                <p className="font-semibold text-slate-200 truncate max-w-[200px]">
                   {customerName}
                 </p>
               </div>
               <div className="text-right">
                 <p className="text-[10px] text-slate-500 uppercase">Estado</p>
-                <p className="font-bold text-amber-400 text-xs capitalize truncate">
-                  {currentStatus.replace(/_/g, " ")}
+                <p className="font-bold text-amber-400 text-xs capitalize">
+                  {formatStatus(rawStatus)}
                 </p>
               </div>
             </div>
@@ -326,43 +328,16 @@ export default function ActiveTripCard({
           </div>
         )}
 
-        {/* Flujo Dinámico de Acciones */}
+        {/* Único Botón de Acción: Finalizar Carrera */}
         <div className="pt-1">
-          {isAcceptedStatus && (
-            <button
-              type="button"
-              onClick={() => handleStatusUpdate("IN_PROGRESS")}
-              disabled={loading}
-              className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
-            >
-              <Navigation className="w-4 h-4" />
-              <span>Voy en Camino (Hacia Cliente)</span>
-            </button>
-          )}
-
-          {isArrivedStatus && (
-            <button
-              type="button"
-              onClick={() => handleStatusUpdate("IN_PROGRESS")}
-              disabled={loading}
-              className="w-full bg-blue-500 hover:bg-blue-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
-            >
-              <MapPinCheck className="w-4 h-4" />
-              <span>Iniciar Recorrido al Destino</span>
-            </button>
-          )}
-
-          {(isInProgressStatus || (!isAcceptedStatus && !isArrivedStatus)) && (
-            <button
-              type="button"
-              onClick={() => handleStatusUpdate("COMPLETED")}
-              disabled={loading}
-              className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all"
-            >
-              <CheckCircle className="w-4 h-4" />
-              <span>Finalizar Carrera</span>
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleCompleteTrip}
+            className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold py-2.5 rounded-xl text-xs flex justify-center items-center space-x-2 shadow-lg active:scale-95 transition-all cursor-pointer"
+          >
+            <CheckCircle className="w-4 h-4" />
+            <span>Finalizar Carrera</span>
+          </button>
         </div>
       </div>
     </div>

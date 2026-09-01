@@ -73,6 +73,12 @@ const driverSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // NUEVO CAMPO: Billetera virtual del conductor
+    walletBalance: {
+      type: Number,
+      default: 30000,
+      min: [0, "El saldo no puede ser negativo"],
+    },
   },
   {
     timestamps: true,

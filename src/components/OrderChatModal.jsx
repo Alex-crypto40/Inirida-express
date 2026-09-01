@@ -13,6 +13,7 @@ const BASE_URL = RAW_API.replace(/\/api\/?$/, "");
 
 const OrderChatModal = ({
   orderId,
+  order, // Acepta la orden completa como fallback
   currentUserRole,
   userType,
   currentUserName,
@@ -23,6 +24,26 @@ const OrderChatModal = ({
   const [isConnected, setIsConnected] = useState(false);
   const socketRef = useRef(null);
   const chatBottomRef = useRef(null);
+
+  // Extracción limpia e infalible del ID de la orden
+  const getTargetOrderId = () => {
+    if (typeof orderId === "string" || typeof orderId === "number") {
+      return orderId;
+    }
+    const targetObj = order || (typeof orderId === "object" ? orderId : null);
+    if (!targetObj) return null;
+
+    return (
+      targetObj._id ||
+      targetObj.id ||
+      targetObj.orderId ||
+      targetObj.order?._id ||
+      targetObj.order?.id ||
+      null
+    );
+  };
+
+  const activeOrderId = getTargetOrderId();
 
   // Normalización estricta de roles ("customer" -> "client")
   let rawRole = currentUserRole || userType || "client";
@@ -47,20 +68,20 @@ const OrderChatModal = ({
   }, [onClose]);
 
   useEffect(() => {
-    if (!orderId) return;
+    if (!activeOrderId) return;
 
     // 1. Fetch del historial de mensajes via HTTP
     const fetchHistory = async () => {
       try {
         const response = await fetch(
-          `${BASE_URL}/api/orders/${orderId}/messages`,
+          `${BASE_URL}/api/orders/${activeOrderId}/messages`,
         );
         if (response.ok) {
           const data = await response.json();
           setMessages(Array.isArray(data) ? data : []);
         } else {
           const legacyRes = await fetch(
-            `${BASE_URL}/orders/${orderId}/messages`,
+            `${BASE_URL}/orders/${activeOrderId}/messages`,
           );
           if (legacyRes.ok) {
             const legacyData = await legacyRes.json();
@@ -88,7 +109,7 @@ const OrderChatModal = ({
       if (socketRef.current) {
         setIsConnected(true);
         // Unirse únicamente a una sala para evitar transmisiones dobles
-        socketRef.current.emit("join_order", orderId);
+        socketRef.current.emit("join_order", activeOrderId);
       }
     };
 
@@ -132,7 +153,7 @@ const OrderChatModal = ({
       });
     };
 
-    // Apagar listeners viejos antes de encender (evita multiplicación acumulativa)
+    // Apagar listeners viejos antes de encender
     socketRef.current.off("receive_message", handleReceiveMessage);
     socketRef.current.off("newMessage", handleReceiveMessage);
 
@@ -141,7 +162,7 @@ const OrderChatModal = ({
 
     return () => {
       if (socketRef.current) {
-        socketRef.current.emit("leave_order", orderId);
+        socketRef.current.emit("leave_order", activeOrderId);
         socketRef.current.off("receive_message", handleReceiveMessage);
         socketRef.current.off("newMessage", handleReceiveMessage);
         socketRef.current.off("connect", joinRoom);
@@ -151,7 +172,7 @@ const OrderChatModal = ({
         socketRef.current.disconnect();
       }
     };
-  }, [orderId]);
+  }, [activeOrderId]);
 
   useEffect(() => {
     chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -161,13 +182,13 @@ const OrderChatModal = ({
   const handleSendMessage = async (e) => {
     e.preventDefault();
     const cleanText = text.trim();
-    if (!cleanText) return;
+    if (!cleanText || !activeOrderId) return;
 
     const tempId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const messageData = {
       _id: tempId,
       tempId,
-      orderId,
+      orderId: activeOrderId,
       senderRole: role,
       senderType: role,
       senderName: name,
@@ -197,7 +218,7 @@ const OrderChatModal = ({
     // Respaldo vía HTTP POST
     if (!sentViaSocket) {
       try {
-        await fetch(`${BASE_URL}/api/orders/${orderId}/messages`, {
+        await fetch(`${BASE_URL}/api/orders/${activeOrderId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -248,7 +269,6 @@ const OrderChatModal = ({
       style={{ zIndex: 1060 }}
       onClick={onClose}
     >
-      {/* Dimensiones compactas para evitar modal desproporcionado */}
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-sm h-[520px] max-h-[85vh] flex flex-col overflow-hidden border border-gray-100 animate-in fade-in zoom-in-95 duration-150"
         onClick={(e) => e.stopPropagation()}
@@ -257,7 +277,7 @@ const OrderChatModal = ({
         <div className="bg-orange-500 text-white p-3.5 flex justify-between items-center shadow-md shrink-0">
           <div>
             <h3 className="font-bold text-sm flex items-center gap-1.5">
-              💬 Chat Carrera #{(orderId || "").toString().slice(-4)}
+              💬 Chat Carrera #{(activeOrderId || "").toString().slice(-4)}
               <span
                 className={`w-2 h-2 rounded-full ${
                   isConnected ? "bg-emerald-400 animate-pulse" : "bg-red-400"

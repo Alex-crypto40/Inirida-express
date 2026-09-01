@@ -4,6 +4,7 @@ import {
   loginDriver,
   toggleOnlineStatus,
   getDriverProfile,
+  rechargeWallet,
 } from "./driverController.js";
 
 const router = express.Router();
@@ -32,5 +33,12 @@ router.put("/:id/status", toggleOnlineStatus);
 // Alias /online por compatibilidad
 router.patch("/:id/online", toggleOnlineStatus);
 router.put("/:id/online", toggleOnlineStatus);
+
+/* ==========================================================================
+   3. Gestión de Billetera Virtual
+   ========================================================================== */
+
+// Procesar o aprobar recarga de saldo
+router.post("/recharge", rechargeWallet);
 
 export default router;

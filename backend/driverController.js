@@ -1,6 +1,7 @@
 import Driver from "./Driver.js";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { addRecharge } from "./walletService.js";
 
 const JWT_SECRET =
   process.env.JWT_SECRET || "secreto_desarrollo_cambiar_en_prod";
@@ -74,7 +75,7 @@ export const registerDriver = async (req, res) => {
   }
 };
 
-// 2. Login de Domiciliarios (CORREGIDO)
+// 2. Login de Domiciliarios
 export const loginDriver = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -124,6 +125,10 @@ export const loginDriver = async (req, res) => {
         isOnline: driver.isOnline,
         rating: driver.rating,
         completedDeliveries: driver.completedDeliveries || 0,
+        walletBalance:
+          typeof driver.walletBalance === "number"
+            ? driver.walletBalance
+            : 30000,
       },
     });
   } catch (error) {
@@ -178,5 +183,40 @@ export const getDriverProfile = async (req, res) => {
   } catch (error) {
     console.error("Error al obtener perfil del repartidor:", error);
     res.status(500).json({ message: "Error interno del servidor." });
+  }
+};
+
+// 5. Recargar billetera del domiciliario
+export const rechargeWallet = async (req, res) => {
+  try {
+    const { driverId, amount } = req.body;
+
+    if (!driverId || !amount) {
+      return res
+        .status(400)
+        .json({ message: "El ID del conductor y el monto son obligatorios." });
+    }
+
+    const newBalance = await addRecharge(driverId, amount);
+
+    // Emite el nuevo saldo mediante WebSockets si la instancia 'io' está registrada en la app
+    const io = req.app.get("io");
+    if (io) {
+      io.to(driverId.toString()).emit("wallet_updated", {
+        newBalance,
+        message: `¡Recarga exitosa! Se han acreditado $${amount} COP.`,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Recarga realizada con éxito.",
+      newBalance,
+    });
+  } catch (error) {
+    console.error("Error al recargar billetera:", error);
+    return res
+      .status(500)
+      .json({ message: error.message || "Error al procesar la recarga." });
   }
 };

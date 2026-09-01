@@ -37,7 +37,7 @@ function MotocarroForm({
     },
     {
       zona: "Centro ↔ Coco Viejo / Nuevo",
-      precio: "$6.000 COP",
+      precio: "$6.000 - 8.000 COP",
       detalle: "Trayectos hacia o desde la comunidad de El Coco.",
       icon: "🌴",
     },

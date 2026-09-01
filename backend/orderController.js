@@ -3,6 +3,7 @@ import Order from "./Order.js";
 import Message from "./Message.js";
 import Driver from "./Driver.js";
 import User from "./User.js";
+import { deductCommission } from "./walletService.js";
 
 // Helper de campos para popular conductor de forma segura (incluye todas las variantes posibles de placas y nombres)
 const DRIVER_POPULATE_FIELDS =
@@ -287,8 +288,8 @@ export const takeOrder = async (req, res) => {
       console.warn(`⚠️ driverId recibido no es ObjectId válido: ${driverId}`);
     }
 
-    // 1. Validar si el conductor ya posee una carrera activa
-    const activeOrder = await Order.findOne({
+    // 1. Validar si el conductor ya posee 2 o más carreras activas
+    const activeOrdersCount = await Order.countDocuments({
       driver: driverId,
       _id: { $ne: orderId },
       status: {
@@ -303,13 +304,11 @@ export const takeOrder = async (req, res) => {
       },
     });
 
-    if (activeOrder) {
+    if (activeOrdersCount >= 2) {
       return res.status(400).json({
-        message:
-          "Ya tienes una carrera activa. Complétala antes de tomar otra.",
+        message: "Ya tienes el límite máximo de 2 carreras activas.",
       });
     }
-
     // 2. Asignar la orden y pasar DIRECTO a 'on_the_way' (En camino)
     let order = await Order.findOneAndUpdate(
       {
@@ -485,6 +484,19 @@ export const updateOrderStatus = async (req, res) => {
     order.status = status;
     await order.save();
 
+    // ---------------------------------------------------------------------------
+    // DESCUENTO DE $500 DE LA BILLETERA AL COMPLETAR LA CARRERA
+    // ---------------------------------------------------------------------------
+    let newBalance = null;
+    if (status === "completed" && order.driver) {
+      try {
+        const driverId = order.driver._id || order.driver;
+        newBalance = await deductCommission(driverId);
+      } catch (walletErr) {
+        console.error("⚠️ Error aplicando descuento de billetera:", walletErr);
+      }
+    }
+
     const populatedResult = order.toObject();
 
     const io = req.app.get("io");
@@ -502,6 +514,7 @@ export const updateOrderStatus = async (req, res) => {
             : "¡Servicio verificado y completado con éxito mediante PIN! 🏁"
           : `Estado actualizado a: ${status}`,
       order: populatedResult,
+      newBalance, // <--- Retorna el nuevo saldo actualizado al frontend
     });
   } catch (error) {
     console.error("Error al actualizar estado del servicio:", error);
