@@ -3,7 +3,7 @@ import {
   createOrder,
   getAvailableOrders,
   getActiveDriverOrder,
-  getCustomerOrders, // <-- AÑADIDO
+  getCustomerOrders,
   getOrderById,
   getOrderMessages,
   createMessage,
@@ -14,7 +14,7 @@ import {
   cancelOrder,
   sendCounterOffer,
   respondCounterOffer,
-} from "./orderController.js";
+} from "./controllers/index.js";
 
 const router = express.Router();
 
@@ -32,7 +32,7 @@ router.get("/available", getAvailableOrders);
 router.get("/driver-active/:driverId", getActiveDriverOrder);
 router.get("/active/driver/:driverId", getActiveDriverOrder);
 
-// Obtener historial de pedidos/carreras de un cliente (NUEVO)
+// Obtener historial de pedidos/carreras de un cliente
 router.get("/customer/:customerId", getCustomerOrders);
 
 // Aceptar / tomar carrera por el conductor

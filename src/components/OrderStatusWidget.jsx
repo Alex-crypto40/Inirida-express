@@ -309,14 +309,18 @@ export default function OrderStatusWidget({
 
   // Origen y Destino
   const origenAddress =
-    activeOrder.origen ||
-    activeOrder.origenName ||
-    activeOrder.address ||
+    (typeof activeOrder.origen === "string" ? activeOrder.origen : null) ||
+    activeOrder.origenAddress ||
+    activeOrder.originAddress ||
     activeOrder.pickupAddress ||
+    activeOrder.address ||
+    activeOrder.origenName ||
+    (typeof activeOrder.origin === "object"
+      ? activeOrder.origin?.address || activeOrder.origin?.name
+      : null) ||
     activeOrder.pickup ||
     activeOrder.from ||
-    activeOrder.customer?.address ||
-    "Ubicación cliente";
+    "Origen no especificado";
 
   const destinoAddress =
     activeOrder.destino ||
@@ -519,14 +523,14 @@ export default function OrderStatusWidget({
               <button
                 disabled={loadingAction}
                 onClick={handleRejectCounterOffer}
-                className="w-1/2 py-2 border border-red-500 text-red-600 hover:bg-red-50 rounded-xl font-bold text-xs"
+                className="w-1/2 py-2 border border-red-500 text-red-600 hover:bg-red-50 rounded-xl font-bold text-xs cursor-pointer"
               >
                 Rechazar ❌
               </button>
               <button
                 disabled={loadingAction}
                 onClick={handleAcceptCounterOffer}
-                className="w-1/2 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs shadow-sm"
+                className="w-1/2 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl font-bold text-xs shadow-sm cursor-pointer"
               >
                 {loadingAction ? "Aceptando..." : "Aceptar Oferta 🤝"}
               </button>
@@ -599,7 +603,7 @@ export default function OrderStatusWidget({
             <div className="pt-1">
               <button
                 type="button"
-                className={`w-full py-2 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-md ${
+                className={`w-full py-2 px-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all duration-300 shadow-md cursor-pointer ${
                   unreadCount > 0
                     ? "bg-red-500 text-white animate-bounce ring-4 ring-red-200"
                     : "bg-gradient-to-r from-orange-500 to-amber-500 text-white hover:opacity-95"

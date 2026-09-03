@@ -31,6 +31,13 @@ const messageSchema = new mongoose.Schema(
       default: "Usuario",
     },
 
+    // 🔒 Campo de control auditado: Teléfono de quien envía el mensaje
+    senderPhone: {
+      type: String,
+      trim: true,
+      default: "",
+    },
+
     // Contenido del mensaje 💬
     text: {
       type: String,

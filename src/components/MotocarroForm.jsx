@@ -147,8 +147,15 @@ function MotocarroForm({
       origen: origen.trim(),
       destino: destino.trim(),
 
+      // 🟢 MANTENEMOS CAMPOS ANTERIORES PARA COMPATIBILIDAD
       customerName: nombre.trim() || "Cliente Motocarro",
       customerPhone: phoneClean,
+
+      // 🟢 ESTRUCTURA OBJETO CUSTOMER PARA INGRESO EN BASE DE DATOS
+      customer: {
+        name: "Cliente General", // Mantiene anonimato público
+        phone: phoneClean, // Permite vinculación interna en MongoDB
+      },
 
       items: [
         {
@@ -181,7 +188,6 @@ function MotocarroForm({
       if (res.ok) {
         const createdOrder = data.order || data;
         if (createdOrder?._id) {
-          // Guardamos la nueva orden activa
           localStorage.setItem("activeOrderId", createdOrder._id);
         }
 

@@ -17,6 +17,7 @@ const OrderChatModal = ({
   currentUserRole,
   userType,
   currentUserName,
+  currentUserPhone, // <-- Prop opcional si se la pasas desde el padre
   onClose,
 }) => {
   const [messages, setMessages] = useState([]);
@@ -57,6 +58,16 @@ const OrderChatModal = ({
       : role === "driver"
         ? "Conductor"
         : "Comercio");
+
+  // Extracción estratégica del teléfono para control interno
+  const targetOrderObj = order || (typeof orderId === "object" ? orderId : {});
+  const userPhone =
+    currentUserPhone ||
+    targetOrderObj.customerPhone ||
+    targetOrderObj.phone ||
+    targetOrderObj.customer?.phone ||
+    localStorage.getItem("userPhone") ||
+    "";
 
   // Cerrar modal al presionar la tecla ESC
   useEffect(() => {
@@ -192,6 +203,7 @@ const OrderChatModal = ({
       senderRole: role,
       senderType: role,
       senderName: name,
+      senderPhone: userPhone, // <-- SE AÑADE EL TELÉFONO SILENCIOSAMENTE
       text: cleanText,
       createdAt: new Date().toISOString(),
     };
@@ -226,6 +238,7 @@ const OrderChatModal = ({
             senderRole: role,
             senderType: role,
             senderName: name,
+            senderPhone: userPhone, // <-- SE AÑADE AL RESPALDO HTTP
             text: cleanText,
           }),
         });
@@ -302,8 +315,23 @@ const OrderChatModal = ({
 
         {/* Mensajes */}
         <div className="flex-1 p-3 overflow-y-auto space-y-2.5 bg-gray-50">
+          {/* BANNER PREVENTIVO Y CANAL DE SOPORTE */}
+          <div className="bg-amber-50 border border-amber-200 text-amber-900 p-2.5 rounded-xl text-[11px] leading-relaxed shadow-2xs mb-2">
+            <div className="font-bold flex items-center gap-1.5 mb-0.5 text-amber-800">
+              <span>🛡️</span>
+              <span>Canal oficial de soporte - Inírida Express</span>
+            </div>
+
+            <p className="text-gray-700">
+              ¿Tienes un retraso, inconveniente o situación durante el servicio?
+              <strong> Repórtalo directamente por este chat.</strong> Los
+              mensajes pueden ser revisados por la administración para realizar
+              seguimiento.
+            </p>
+          </div>
+
           {messages.length === 0 ? (
-            <div className="text-center text-gray-400 text-xs mt-12">
+            <div className="text-center text-gray-400 text-xs mt-8">
               <p>📍 Chat activo entre Cliente y Motocarro.</p>
               <p className="text-[11px] mt-1 text-gray-400">
                 Escribe un mensaje para iniciar la conversación.

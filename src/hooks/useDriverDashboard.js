@@ -9,8 +9,6 @@ const FARE_FEE = 500; // Tarifa por servicio ($500 COP)
 
 /**
  * Formatea el nombre para mantener la estética del UI.
- * Muestra Primer Nombre + Primer Apellido (o solo el primer nombre si no hay más).
- * Ejemplo: "Nelson Alexander Bayona" -> "Nelson Bayona"
  */
 const formatDriverName = (fullName) => {
   if (!fullName || typeof fullName !== "string") return "Conductor";
@@ -119,9 +117,7 @@ export function useDriverDashboard({
         return Number(savedBalance);
       }
     } catch (e) {}
-    return typeof initialWalletBalance === "number"
-      ? initialWalletBalance
-      : 19500;
+    return 19500;
   });
 
   // Estados para el Chat
@@ -152,7 +148,6 @@ export function useDriverDashboard({
         if (res.ok) {
           const data = await res.json();
 
-          // Solo actualizar si el backend devuelve un saldo numérico explícito
           if (data && typeof data.walletBalance === "number") {
             setWalletBalance(data.walletBalance);
           }
@@ -329,7 +324,6 @@ export function useDriverDashboard({
     }
   }, [validDriverId, socket]);
 
-  // Ejecutar búsqueda inicial de órdenes automáticamente al conectarse
   useEffect(() => {
     if (isOnline) {
       fetchOrders();
@@ -568,7 +562,7 @@ export function useDriverDashboard({
   };
 
   // ---------------------------------------------------------------------------
-  // WEBSOCKETS EN TIEMPO REAL
+  // WEBSOCKETS EN TIEMPO REAL (CANCELACIONES Y ACTUALIZACIONES)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!socket || !isOnline) return;
@@ -592,38 +586,119 @@ export function useDriverDashboard({
       });
     };
 
+    // Manejador unificado de eliminación/cancelación de órdenes por el cliente
     const handleOrderCancelled = (data) => {
-      const orderId = (data.orderId || data._id || data.id || "").toString();
+      if (!data) return;
+      const orderId = (
+        data.orderId ||
+        data._id ||
+        data.id ||
+        data.order?._id ||
+        data.order?.id ||
+        ""
+      )
+        .toString()
+        .replace(/^order_/, "");
+
+      if (!orderId) return;
+
+      // 1. Quitar de disponibles inmediatamente
       setAvailableOrders((prev) =>
-        prev.filter((o) => (o._id || o.id || "").toString() !== orderId),
+        prev.filter(
+          (o) =>
+            (o._id || o.id || "").toString().replace(/^order_/, "") !== orderId,
+        ),
       );
 
+      // 2. Quitar de activas si el conductor la tenía aceptada y lanzar advertencia
       setActiveOrders((prev) => {
         const wasActive = prev.some(
-          (o) => (o._id || o.id || "").toString() === orderId,
+          (o) =>
+            (o._id || o.id || "").toString().replace(/^order_/, "") === orderId,
         );
-        if (wasActive) {
+
+        // Solo si la carrera NO fue completada explícitamente mostramos el error
+        if (wasActive && data.status !== "completed") {
           setError(
             "Una de tus carreras en curso fue cancelada por el cliente.",
           );
         }
-        return prev.filter((o) => (o._id || o.id || "").toString() !== orderId);
+
+        return prev.filter(
+          (o) =>
+            (o._id || o.id || "").toString().replace(/^order_/, "") !== orderId,
+        );
       });
+
+      // 3. Cerrar chat si estaba abierto para esta orden
+      if (
+        chatTargetOrder &&
+        (chatTargetOrder._id || chatTargetOrder.id || "")
+          .toString()
+          .replace(/^order_/, "") === orderId
+      ) {
+        setIsChatOpen(false);
+        setChatMessages([]);
+        setChatTargetOrder(null);
+      }
+    };
+
+    // Manejador cuando otro conductor toma la carrera
+    const handleOrderTaken = (data) => {
+      const orderId = (
+        data?.orderId ||
+        data?.order?._id ||
+        data?.order?.id ||
+        ""
+      )
+        .toString()
+        .replace(/^order_/, "");
+      if (!orderId) return;
+
+      // Remover de disponibles para los demás conductores
+      setAvailableOrders((prev) =>
+        prev.filter(
+          (o) =>
+            (o._id || o.id || "").toString().replace(/^order_/, "") !== orderId,
+        ),
+      );
     };
 
     const handleStatusUpdated = (data) => {
-      const orderId = (data.orderId || data._id || data.id || "").toString();
-      const newStatus = data.status;
+      if (!data) return;
+      const orderId = (data.orderId || data._id || data.id || "")
+        .toString()
+        .replace(/^order_/, "");
+      const newStatus = (data.status || "").toLowerCase();
 
-      if (["completed", "cancelled"].includes(newStatus?.toLowerCase())) {
+      if (newStatus === "completed") {
+        // Remover de carreras activas limpiamente
         setActiveOrders((prev) =>
-          prev.filter((o) => (o._id || o.id || "").toString() !== orderId),
+          prev.filter(
+            (o) =>
+              (o._id || o.id || "").toString().replace(/^order_/, "") !==
+              orderId,
+          ),
         );
+        // Cerrar chat si corresponde
+        if (
+          chatTargetOrder &&
+          (chatTargetOrder._id || chatTargetOrder.id || "")
+            .toString()
+            .replace(/^order_/, "") === orderId
+        ) {
+          setIsChatOpen(false);
+          setChatMessages([]);
+          setChatTargetOrder(null);
+        }
+      } else if (["cancelled", "cancelado"].includes(newStatus)) {
+        handleOrderCancelled({ orderId, status: "cancelled" });
       } else {
+        // Actualizar estado en tiempo real (on_the_way, arrived, etc.)
         setActiveOrders((prev) =>
           prev.map((o) =>
-            (o._id || o.id || "").toString() === orderId
-              ? { ...o, status: newStatus }
+            (o._id || o.id || "").toString().replace(/^order_/, "") === orderId
+              ? { ...o, status: data.status }
               : o,
           ),
         );
@@ -656,9 +731,18 @@ export function useDriverDashboard({
       }
     };
 
+    // Registro de Listeners WebSockets
     socket.on("new_order", handleNewOrder);
     socket.on("order_created", handleNewOrder);
+    socket.on("order:created", handleNewOrder);
+
     socket.on("order_cancelled", handleOrderCancelled);
+    socket.on("order:cancelled", handleOrderCancelled);
+    socket.on("orderCancelled", handleOrderCancelled);
+
+    socket.on("order:taken", handleOrderTaken);
+    socket.on("order_taken", handleOrderTaken);
+
     socket.on("order_status_updated", handleStatusUpdated);
     socket.on("orderUpdated", handleStatusUpdated);
     socket.on("order_updated", handleStatusUpdated);
@@ -671,15 +755,24 @@ export function useDriverDashboard({
     return () => {
       socket.off("new_order", handleNewOrder);
       socket.off("order_created", handleNewOrder);
+      socket.off("order:created", handleNewOrder);
+
       socket.off("order_cancelled", handleOrderCancelled);
+      socket.off("order:cancelled", handleOrderCancelled);
+      socket.off("orderCancelled", handleOrderCancelled);
+
+      socket.off("order:taken", handleOrderTaken);
+      socket.off("order_taken", handleOrderTaken);
+
       socket.off("order_status_updated", handleStatusUpdated);
       socket.off("orderUpdated", handleStatusUpdated);
       socket.off("order_updated", handleStatusUpdated);
       socket.off("order:status_updated", handleStatusUpdated);
+
       socket.off("receive_message", handleReceiveMessage);
       socket.off("wallet_updated", handleWalletUpdated);
     };
-  }, [socket, isOnline, validDriverId, driverNameState]);
+  }, [socket, isOnline, validDriverId, driverNameState, chatTargetOrder]);
 
   // Auto-scroll del chat
   useEffect(() => {

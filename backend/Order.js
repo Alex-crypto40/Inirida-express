@@ -147,6 +147,7 @@ orderSchema.index({ status: 1, createdAt: -1 });
 orderSchema.index({ driver: 1, status: 1 });
 orderSchema.index({ store: 1, createdAt: -1 });
 orderSchema.index({ serviceType: 1, status: 1 });
+orderSchema.index({ "customer.phone": 1 });
 
 const Order = mongoose.model("Order", orderSchema);
 

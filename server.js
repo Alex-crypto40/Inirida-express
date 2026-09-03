@@ -214,8 +214,15 @@ io.on("connection", (socket) => {
   // 🟢 Evento: envío de mensajes de chat
   const handleSendMessage = async (data) => {
     try {
-      const { orderId, text, senderRole, senderName, senderType, senderId } =
-        data;
+      const {
+        orderId,
+        text,
+        senderRole,
+        senderName,
+        senderType,
+        senderId,
+        senderPhone,
+      } = data;
 
       if (!orderId || !text) return;
 
@@ -227,6 +234,7 @@ io.on("connection", (socket) => {
         orderId: cleanOrderId,
         senderRole: role,
         senderName: name,
+        senderPhone: senderPhone || "",
         senderId,
         text,
       });
