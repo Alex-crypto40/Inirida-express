@@ -38,9 +38,9 @@ function Home({ socket }) {
 
   const categoriasGlobales = [
     { id: "motocarro", label: "Motocarro", icon: "🛺" },
-    { id: "turismo", label: "Turismo", icon: "🌴" },
     { id: "restaurante", label: "Comida", icon: "🍔" },
     { id: "licorera", label: "Licores", icon: "🍺" },
+    { id: "turismo", label: "Turismo", icon: "🌴" },
     { id: "hotel", label: "Hoteles", icon: "🏨" },
     { id: "mandados", label: "Mandados", icon: "🛵" },
   ];
