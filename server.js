@@ -27,6 +27,7 @@ const app = express();
 // 🔒 Configuración de CORS permitiendo orígenes explícitos y dinámicos
 const allowedOrigins = [
   "https://inirida-express-frontend.onrender.com",
+  "https://inirida-express.onrender.com",
   "http://localhost:5173",
   "http://localhost:3000",
 ];
@@ -59,7 +60,7 @@ app.use(express.json());
 // 🛠️ 4. Creación del servidor HTTP wrapper para WebSockets
 const server = http.createServer(app);
 
-// Configuración de Socket.io adaptada a redes inestables
+// Configuración de Socket.io adaptada a proxies HTTPS de Render
 const io = new Server(server, {
   cors: {
     origin: (origin, callback) => callback(null, true),
@@ -67,7 +68,7 @@ const io = new Server(server, {
     credentials: true,
   },
   transports: ["websocket", "polling"],
-  pingTimeout: 90000,
+  pingTimeout: 60000,
   pingInterval: 25000,
   connectTimeout: 45000,
 });
@@ -75,8 +76,16 @@ const io = new Server(server, {
 // 🔑 Inyectamos 'io' en Express
 app.set("io", io);
 
-// 📍 Memoria en servidor para mantener la última ubicación de los conductores activos
+// 📍 Memoria global de ubicaciones activas de los conductores
 const activeDriversLocations = new Map();
+
+// Helper para emitir lista global actualizada
+const broadcastDriversList = () => {
+  const driversList = Array.from(activeDriversLocations.values()).filter(
+    (d) => d.isAvailable,
+  );
+  io.emit("drivers_online_list", driversList);
+};
 
 // 🔌 5. Lógica de comunicación en tiempo real
 io.on("connection", (socket) => {
@@ -91,17 +100,15 @@ io.on("connection", (socket) => {
       existing.updatedAt = new Date();
       activeDriversLocations.set(driverId, existing);
     }
+    broadcastDriversList();
   });
 
   // Enviar lista completa de motocarros disponibles inmediatamente al conectar
-  socket.emit(
-    "initial_drivers_locations",
-    Array.from(activeDriversLocations.values()),
+  const currentList = Array.from(activeDriversLocations.values()).filter(
+    (d) => d.isAvailable,
   );
-  socket.emit(
-    "drivers_online_list",
-    Array.from(activeDriversLocations.values()),
-  );
+  socket.emit("initial_drivers_locations", currentList);
+  socket.emit("drivers_online_list", currentList);
 
   // 🛰️ Evento: Actualización de posición GPS del conductor
   socket.on("update_driver_location", (data) => {
@@ -141,17 +148,11 @@ io.on("connection", (socket) => {
 
       io.emit("driver_location_changed", driverInfo);
       io.emit("driver_location_updated", driverInfo);
-      io.emit(
-        "drivers_online_list",
-        Array.from(activeDriversLocations.values()),
-      );
+      broadcastDriversList();
     } else {
       activeDriversLocations.delete(driverId);
       io.emit("driver_disconnected_location", { driverId });
-      io.emit(
-        "drivers_online_list",
-        Array.from(activeDriversLocations.values()),
-      );
+      broadcastDriversList();
     }
   });
 
@@ -259,31 +260,29 @@ io.on("connection", (socket) => {
   socket.on("send_message", handleSendMessage);
   socket.on("send_chat_message", handleSendMessage);
 
-  // Desconexión con tolerancia a redes móviles
+  // Desconexión adaptada a redes móviles inestables
   socket.on("disconnect", () => {
     console.log(`❌ Usuario desconectado del WebSocket: ${socket.id}`);
 
+    // Tolerancia de 60 segundos antes de eliminar al conductor de la vista si se cae la red móvil
     setTimeout(() => {
       for (const [driverId, info] of activeDriversLocations.entries()) {
         if (info.socketId === socket.id) {
           const timeDiff = new Date() - new Date(info.updatedAt);
-          if (timeDiff >= 15000) {
+          if (timeDiff >= 60000) {
             activeDriversLocations.delete(driverId);
             io.emit("driver_disconnected_location", { driverId });
-            io.emit(
-              "drivers_online_list",
-              Array.from(activeDriversLocations.values()),
-            );
+            broadcastDriversList();
           }
           break;
         }
       }
-    }, 15000);
+    }, 60000);
   });
 });
 
 /* ==========================================================================
-   6. Rutas de la API (DEBEN IR ANTES DE LOS ARCHIVOS ESTÁTICOS)
+   6. Rutas de la API
    ========================================================================== */
 app.use("/api/auth", authRoutes);
 app.use("/api/stores", storeRoutes);

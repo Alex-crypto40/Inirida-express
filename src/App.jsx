@@ -69,7 +69,11 @@ function App() {
 
   useEffect(() => {
     const newSocket = io(SOCKET_URL, {
-      transports: ["polling", "websocket"],
+      transports: ["websocket", "polling"], // 🟢 Priorizar WebSocket directo
+      secure: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
       withCredentials: true,
     });
 

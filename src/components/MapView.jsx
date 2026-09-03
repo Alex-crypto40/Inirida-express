@@ -2,13 +2,38 @@ import React, { useState, useEffect } from "react";
 import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 
-// Icono personalizado para el Motocarro
-const motocarroIcon = new L.Icon({
-  iconUrl: "https://cdn-icons-png.flaticon.com/512/1048/1048314.png",
-  iconSize: [38, 38],
-  iconAnchor: [19, 38],
-  popupAnchor: [0, -38],
-});
+// Creador de icono HTML tipo Radar/Pulso
+const createRadarIcon = (isSelected) => {
+  const dotColorClass = isSelected ? "bg-emerald-500" : "bg-orange-500";
+  const ringColorClass = isSelected ? "bg-emerald-400" : "bg-orange-400";
+
+  return L.divIcon({
+    className: "custom-radar-marker",
+    html: `
+      <div style="position: relative; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;">
+        <span class="${ringColorClass}" style="
+          position: absolute;
+          width: 100%;
+          height: 100%;
+          border-radius: 50%;
+          opacity: 0.75;
+          animation: radarPulse 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+        "></span>
+        <span class="${dotColorClass}" style="
+          position: relative;
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          border: 2px solid white;
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        "></span>
+      </div>
+    `,
+    iconSize: [24, 24],
+    iconAnchor: [12, 12],
+    popupAnchor: [0, -12],
+  });
+};
 
 // Componente auxiliar para centrar suavemente el mapa
 function RecenterMap({ location }) {
@@ -83,11 +108,21 @@ export default function MapView({
         overflow: "hidden",
         boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
         position: "relative",
-        zIndex: 0, // Fuerza un nuevo stacking context en el nivel base
+        zIndex: 0,
       }}
     >
-      {/* Estilos inyectados para forzar a Leaflet a staying debajo de los menús */}
+      {/* Animación del pulso de radar e inhibición de z-index conflictivos */}
       <style>{`
+        @keyframes radarPulse {
+          0% {
+            transform: scale(0.6);
+            opacity: 0.8;
+          }
+          100% {
+            transform: scale(2.2);
+            opacity: 0;
+          }
+        }
         .leaflet-container {
           z-index: 1 !important;
         }
@@ -118,62 +153,62 @@ export default function MapView({
           </Marker>
         )}
 
-        {/* Marcadores de Motocarros activos en tiempo real */}
-        {Object.values(drivers).map((driver) => (
-          <Marker
-            key={driver.driverId}
-            position={[driver.lat, driver.lng]}
-            icon={motocarroIcon}
-            eventHandlers={{
-              click: () => {
-                if (onSelectDriver) {
-                  onSelectDriver(driver);
-                }
-              },
-            }}
-          >
-            <Popup>
-              <div style={{ textAlign: "center", padding: "4px" }}>
-                <strong style={{ fontSize: "14px" }}>
-                  {driver.driverName || "Motocarro Express"}
-                </strong>
-                <br />
-                <span
-                  style={{
-                    fontSize: "12px",
-                    color: "#16a34a",
-                    fontWeight: "bold",
-                  }}
-                >
-                  🟢 En Línea y Disponible
-                </span>
-                {onSelectDriver && (
-                  <button
-                    onClick={() => onSelectDriver(driver)}
+        {/* Marcadores de Motocarros activos en tiempo real (Puntos de Radar) */}
+        {Object.values(drivers).map((driver) => {
+          const isSelected = selectedDriverId === driver.driverId;
+          return (
+            <Marker
+              key={driver.driverId}
+              position={[driver.lat, driver.lng]}
+              icon={createRadarIcon(isSelected)}
+              eventHandlers={{
+                click: () => {
+                  if (onSelectDriver) {
+                    onSelectDriver(driver);
+                  }
+                },
+              }}
+            >
+              <Popup>
+                <div style={{ textAlign: "center", padding: "4px" }}>
+                  <strong style={{ fontSize: "14px" }}>
+                    {driver.driverName || "Motocarro Express"}
+                  </strong>
+                  <br />
+                  <span
                     style={{
-                      marginTop: "8px",
-                      width: "100%",
-                      backgroundColor:
-                        selectedDriverId === driver.driverId
-                          ? "#16a34a"
-                          : "#ea580c",
-                      color: "#ffffff",
-                      border: "none",
-                      borderRadius: "6px",
-                      padding: "6px 10px",
+                      fontSize: "12px",
+                      color: "#16a34a",
                       fontWeight: "bold",
-                      cursor: "pointer",
                     }}
                   >
-                    {selectedDriverId === driver.driverId
-                      ? "✓ Seleccionado"
-                      : "Pedir a este Motocarro 🛺"}
-                  </button>
-                )}
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+                    🟢 En Línea y Disponible
+                  </span>
+                  {onSelectDriver && (
+                    <button
+                      onClick={() => onSelectDriver(driver)}
+                      style={{
+                        marginTop: "8px",
+                        width: "100%",
+                        backgroundColor: isSelected ? "#16a34a" : "#ea580c",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "6px",
+                        padding: "6px 10px",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {isSelected
+                        ? "✓ Seleccionado"
+                        : "Pedir a este Motocarro 🛺"}
+                    </button>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
       </MapContainer>
     </div>
   );
