@@ -200,7 +200,7 @@ export function useDriverDashboard({
   }, [walletBalance, validDriverId]);
 
   // ---------------------------------------------------------------------------
-  // GEOLOCALIZACIÓN Y GPS EN TIEMPO REAL
+  // GEOLOCALIZACIÓN Y GPS EN TIEMPO REAL (WATCH + HEARTBEAT)
   // ---------------------------------------------------------------------------
   useEffect(() => {
     if (!isOnline) {
@@ -210,6 +210,21 @@ export function useDriverDashboard({
     }
 
     if ("geolocation" in navigator) {
+      // Función auxiliar para emitir la ubicación actual al socket
+      const emitLocation = (coords) => {
+        if (socket && socket.connected) {
+          socket.emit("update_driver_location", {
+            driverId: validDriverId,
+            driverName: driverNameState,
+            lat: coords.lat,
+            lng: coords.lng,
+            activeOrderIds: activeOrders.map((o) => o._id || o.id),
+            isOnline: true,
+          });
+        }
+      };
+
+      // 1. Escuchar cambios de posición continuos
       const watchId = navigator.geolocation.watchPosition(
         (pos) => {
           const coords = {
@@ -218,17 +233,7 @@ export function useDriverDashboard({
           };
           setCurrentCoords(coords);
           setGpsAccuracy(pos.coords.accuracy);
-
-          if (socket && socket.connected) {
-            socket.emit("update_driver_location", {
-              driverId: validDriverId,
-              driverName: driverNameState,
-              lat: coords.lat,
-              lng: coords.lng,
-              activeOrderIds: activeOrders.map((o) => o._id || o.id),
-              isOnline: true,
-            });
-          }
+          emitLocation(coords);
         },
         (err) => {
           console.error("Error obteniendo ubicación GPS:", err);
@@ -237,7 +242,27 @@ export function useDriverDashboard({
         { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 },
       );
 
-      return () => navigator.geolocation.clearWatch(watchId);
+      // 2. Heartbeat cada 15s para asegurar la persistencia en el backend
+      const gpsInterval = setInterval(() => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const coords = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+            };
+            setCurrentCoords(coords);
+            setGpsAccuracy(pos.coords.accuracy);
+            emitLocation(coords);
+          },
+          null,
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+        );
+      }, 15000);
+
+      return () => {
+        navigator.geolocation.clearWatch(watchId);
+        clearInterval(gpsInterval);
+      };
     } else {
       setError("La geolocalización no está soportada en este dispositivo.");
     }
@@ -586,7 +611,6 @@ export function useDriverDashboard({
       });
     };
 
-    // Manejador unificado de eliminación/cancelación de órdenes por el cliente
     const handleOrderCancelled = (data) => {
       if (!data) return;
       const orderId = (
@@ -602,7 +626,6 @@ export function useDriverDashboard({
 
       if (!orderId) return;
 
-      // 1. Quitar de disponibles inmediatamente
       setAvailableOrders((prev) =>
         prev.filter(
           (o) =>
@@ -610,14 +633,12 @@ export function useDriverDashboard({
         ),
       );
 
-      // 2. Quitar de activas si el conductor la tenía aceptada y lanzar advertencia
       setActiveOrders((prev) => {
         const wasActive = prev.some(
           (o) =>
             (o._id || o.id || "").toString().replace(/^order_/, "") === orderId,
         );
 
-        // Solo si la carrera NO fue completada explícitamente mostramos el error
         if (wasActive && data.status !== "completed") {
           setError(
             "Una de tus carreras en curso fue cancelada por el cliente.",
@@ -630,7 +651,6 @@ export function useDriverDashboard({
         );
       });
 
-      // 3. Cerrar chat si estaba abierto para esta orden
       if (
         chatTargetOrder &&
         (chatTargetOrder._id || chatTargetOrder.id || "")
@@ -643,7 +663,6 @@ export function useDriverDashboard({
       }
     };
 
-    // Manejador cuando otro conductor toma la carrera
     const handleOrderTaken = (data) => {
       const orderId = (
         data?.orderId ||
@@ -655,7 +674,6 @@ export function useDriverDashboard({
         .replace(/^order_/, "");
       if (!orderId) return;
 
-      // Remover de disponibles para los demás conductores
       setAvailableOrders((prev) =>
         prev.filter(
           (o) =>
@@ -672,7 +690,6 @@ export function useDriverDashboard({
       const newStatus = (data.status || "").toLowerCase();
 
       if (newStatus === "completed") {
-        // Remover de carreras activas limpiamente
         setActiveOrders((prev) =>
           prev.filter(
             (o) =>
@@ -680,7 +697,6 @@ export function useDriverDashboard({
               orderId,
           ),
         );
-        // Cerrar chat si corresponde
         if (
           chatTargetOrder &&
           (chatTargetOrder._id || chatTargetOrder.id || "")
@@ -694,7 +710,6 @@ export function useDriverDashboard({
       } else if (["cancelled", "cancelado"].includes(newStatus)) {
         handleOrderCancelled({ orderId, status: "cancelled" });
       } else {
-        // Actualizar estado en tiempo real (on_the_way, arrived, etc.)
         setActiveOrders((prev) =>
           prev.map((o) =>
             (o._id || o.id || "").toString().replace(/^order_/, "") === orderId
@@ -731,7 +746,6 @@ export function useDriverDashboard({
       }
     };
 
-    // Registro de Listeners WebSockets
     socket.on("new_order", handleNewOrder);
     socket.on("order_created", handleNewOrder);
     socket.on("order:created", handleNewOrder);
