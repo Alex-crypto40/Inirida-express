@@ -229,37 +229,13 @@ function MotocarroForm({
       )}
 
       <div
-        className={`bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-3.5 max-w-md mx-auto transition-all ${
+        className={`bg-white rounded-3xl p-4 shadow-lg shadow-orange-500/10 border border-orange-200/80 space-y-3.5 max-w-md mx-auto transition-all ${
           !isVerified ? "pointer-events-none select-none filter blur-sm" : ""
         }`}
       >
-        {/* Cabecera */}
-        <div className="flex items-center justify-between pb-2 border-b border-gray-100">
-          <div className="flex items-center gap-2">
-            <span className="text-xl p-2 bg-orange-100 rounded-xl">🛺</span>
-            <div>
-              <h3 className="font-extrabold text-sm text-gray-800">
-                Pedir Carrera
-              </h3>
-              <p className="text-[11px] text-gray-400">Inírida Express</p>
-            </div>
-          </div>
-
-          {isVerified && (
-            <div className="bg-gray-50 border border-gray-200 px-2.5 py-1 rounded-xl text-right">
-              <p className="text-[10px] font-bold text-gray-700 truncate max-w-[110px]">
-                👤 {nombre || "Cliente"}
-              </p>
-              <p className="text-[9px] text-gray-500 font-semibold">
-                📱 {telefono}
-              </p>
-            </div>
-          )}
-        </div>
-
         {/* Motocarro Directo Seleccionado */}
         {selectedDriver && (
-          <div className="bg-orange-50 border border-orange-200 rounded-xl p-2.5 flex items-center justify-between">
+          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-2.5 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <span className="text-sm">🎯</span>
               <div>
@@ -274,7 +250,7 @@ function MotocarroForm({
             <button
               type="button"
               onClick={onClearSelectedDriver}
-              className="text-xs text-orange-600 font-bold px-2 py-1 bg-white rounded-lg border border-orange-200 cursor-pointer"
+              className="text-xs text-orange-600 font-bold px-2.5 py-1 bg-white rounded-xl border border-orange-200 cursor-pointer hover:bg-orange-100/50 transition-colors"
             >
               Quitar
             </button>
@@ -282,12 +258,15 @@ function MotocarroForm({
         )}
 
         <form onSubmit={solicitarCarrera} className="space-y-3">
-          {/* Inputs Origen y Destino */}
-          <div className="bg-gray-50/80 p-3 rounded-2xl border border-gray-200/80 space-y-2">
+          {/* Inputs Origen y Destino con línea conectora visual */}
+          <div className="bg-gray-50/90 p-3.5 rounded-2xl border border-gray-200/80 space-y-3 relative">
+            {/* Línea conectora visual estilo app de transporte */}
+            <div className="absolute left-[25px] top-[28px] bottom-[30px] w-0.5 border-l-2 border-dashed border-gray-300 pointer-events-none z-0" />
+
             {/* Origen */}
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full bg-green-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
+            <div className="relative z-10">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-xs">
                   A
                 </span>
                 <input
@@ -295,14 +274,14 @@ function MotocarroForm({
                   placeholder="¿Dónde te recogen? (Barrio / Referencia) *"
                   value={origen}
                   onChange={(e) => setOrigen(e.target.value)}
-                  className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800"
+                  className="w-full py-2 px-3 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none font-medium text-gray-800 transition-all"
                   required
                 />
                 <button
                   type="button"
                   onClick={obtenerUbicacionGPS}
                   disabled={loadingGps}
-                  className="p-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl text-xs font-bold shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1"
+                  className="px-2.5 py-2 bg-orange-100 hover:bg-orange-200 text-orange-700 rounded-xl text-xs font-bold shrink-0 cursor-pointer disabled:opacity-50 flex items-center gap-1 transition-colors"
                   title="Usar mi ubicación GPS"
                 >
                   <span>{loadingGps ? "⌛" : "📍 GPS"}</span>
@@ -310,7 +289,7 @@ function MotocarroForm({
               </div>
 
               {origen.includes("GPS") && (
-                <p className="text-[9px] text-orange-600 font-bold mt-1 ml-6 animate-fadeIn">
+                <p className="text-[9px] text-orange-600 font-bold mt-1 ml-8 animate-fadeIn">
                   💡 Agrega una referencia si deseas (Ej: {origen} - Frente al
                   parque)
                 </p>
@@ -318,22 +297,24 @@ function MotocarroForm({
             </div>
 
             {/* Destino */}
-            <div className="flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full bg-orange-500 text-white flex items-center justify-center text-[9px] font-bold shrink-0">
-                B
-              </span>
-              <input
-                type="text"
-                placeholder="¿A dónde vas? *"
-                value={destino}
-                onChange={(e) => setDestino(e.target.value)}
-                className="w-full p-2 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 outline-none font-medium text-gray-800"
-                required
-              />
+            <div className="relative z-10">
+              <div className="flex items-center gap-2.5">
+                <span className="w-6 h-6 rounded-full bg-orange-500 text-white flex items-center justify-center text-[10px] font-black shrink-0 shadow-xs">
+                  B
+                </span>
+                <input
+                  type="text"
+                  placeholder="¿A dónde vas? *"
+                  value={destino}
+                  onChange={(e) => setDestino(e.target.value)}
+                  className="w-full py-2 px-3 text-xs rounded-xl bg-white border border-gray-200 focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 outline-none font-medium text-gray-800 transition-all"
+                  required
+                />
+              </div>
             </div>
 
             {/* Chips Rápidos */}
-            <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar">
+            <div className="flex gap-1.5 pt-1 overflow-x-auto no-scrollbar ml-8">
               {[
                 "Centro",
                 "Aeropuerto",
@@ -346,7 +327,7 @@ function MotocarroForm({
                   key={chip}
                   type="button"
                   onClick={() => setDestino(chip)}
-                  className="text-[10px] bg-white border border-gray-200 hover:border-orange-300 text-gray-600 px-2 py-0.5 rounded-lg font-semibold shrink-0 cursor-pointer"
+                  className="text-[10px] bg-white border border-gray-200/90 hover:border-orange-400 hover:text-orange-600 text-gray-600 px-2.5 py-1 rounded-lg font-bold shrink-0 cursor-pointer transition-all active:scale-95 shadow-2xs"
                 >
                   + {chip}
                 </button>
@@ -355,10 +336,10 @@ function MotocarroForm({
           </div>
 
           {/* Tarjeta Informativa de Pago */}
-          <div className="bg-gradient-to-br from-slate-50 to-orange-50/30 border border-orange-100 rounded-2xl p-3 space-y-2">
+          <div className="bg-gradient-to-br from-slate-50 to-orange-50/40 border border-orange-100 rounded-2xl p-3 space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <span className="text-base">💵</span>
+              <div className="flex items-center gap-2">
+                <span className="text-lg">💵</span>
                 <div>
                   <p className="text-xs font-bold text-gray-800">
                     Pago Directo al Conductor
@@ -372,7 +353,7 @@ function MotocarroForm({
               <button
                 type="button"
                 onClick={() => setShowTarifasGuide(!showTarifasGuide)}
-                className="text-[10px] bg-orange-500 hover:bg-orange-600 text-white font-bold px-2.5 py-1.5 rounded-xl shadow-xs transition-all flex items-center gap-1 cursor-pointer"
+                className="text-[10px] bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold px-2.5 py-1.5 rounded-xl shadow-xs transition-all flex items-center gap-1 cursor-pointer active:scale-95"
               >
                 <span>{showTarifasGuide ? "✕ Cerrar" : "💡 Ver Guía"}</span>
               </button>
@@ -430,14 +411,14 @@ function MotocarroForm({
             placeholder="Comentario opcional (Ej: 2 personas / Llevo maletas)"
             value={comentarios}
             onChange={(e) => setComentarios(e.target.value)}
-            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 outline-none text-gray-800"
+            className="w-full p-2.5 text-xs rounded-xl bg-gray-50 border border-gray-200 focus:border-orange-500 focus:bg-white outline-none font-medium text-gray-800 transition-all"
           />
 
           {/* Botón Principal */}
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-200 transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
+            className="w-full py-3.5 bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-extrabold rounded-2xl text-sm shadow-md shadow-orange-500/20 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2 disabled:opacity-60"
           >
             {submitting ? "Enviando Solicitud... ⏳" : "Solicitar Motocarro 🚀"}
           </button>
