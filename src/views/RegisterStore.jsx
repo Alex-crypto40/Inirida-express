@@ -27,7 +27,7 @@ function RegisterStore() {
 
     try {
       const response = await fetch(
-        "http://192.168.1.245:5000/api/stores/register",
+        "http://192.168.1.246:5000/api/stores/register",
         {
           method: "POST",
           headers: {

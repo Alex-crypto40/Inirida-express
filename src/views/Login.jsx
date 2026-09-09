@@ -90,9 +90,32 @@ function Login() {
 
   return (
     <div className="min-h-[80vh] flex flex-col justify-center items-center px-4">
-      <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100">
+      <div className="bg-white p-6 rounded-2xl shadow-xl w-full max-w-sm border border-gray-100 relative">
+        {/* BOTÓN VOLVER / FLECHA ATRÁS */}
+        <button
+          type="button"
+          onClick={() => navigate(-1)}
+          className="absolute top-4 left-4 p-2 rounded-full text-gray-500 hover:text-gray-800 hover:bg-gray-100 active:scale-95 transition-all cursor-pointer flex items-center justify-center"
+          title="Volver"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2.5}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M10 19l-7-7m0 0l7-7m-7 7h18"
+            />
+          </svg>
+        </button>
+
         {/* Encabezado del Formulario */}
-        <div className="text-center mb-6">
+        <div className="text-center mb-6 pt-2">
           <span className="text-4xl">🔑</span>
           <h2 className="text-2xl font-black text-gray-800 mt-2">
             Acceso Aliados
@@ -144,7 +167,7 @@ function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold py-3 rounded-xl shadow-md shadow-orange-500/20 transition-all text-sm mt-2 disabled:bg-gray-400 flex justify-center items-center gap-2"
+            className="w-full bg-orange-500 hover:bg-orange-600 active:scale-95 text-white font-bold py-3 rounded-xl shadow-md shadow-orange-500/20 transition-all text-sm mt-2 disabled:bg-gray-400 flex justify-center items-center gap-2 cursor-pointer disabled:cursor-not-allowed"
           >
             {loading ? (
               <>
@@ -165,7 +188,7 @@ function Login() {
           <button
             type="button"
             onClick={() => navigate("/register-store")}
-            className="text-xs text-orange-500 font-bold hover:underline block mt-1 w-full text-center"
+            className="text-xs text-orange-500 font-bold hover:underline block mt-1 w-full text-center cursor-pointer"
           >
             Solicita tu acceso de Aliado aquí 📲
           </button>

@@ -13,7 +13,7 @@ import {
   Check,
 } from "lucide-react";
 
-export const UserProfileModal = ({ onClose }) => {
+export const UserProfileModal = ({ onClose, onUpdateUser }) => {
   const [userName, setUserName] = useState("");
   const [userPhone, setUserPhone] = useState("");
   const [addresses, setAddresses] = useState([]);
@@ -57,9 +57,24 @@ export const UserProfileModal = ({ onClose }) => {
   // Guardar datos del perfil general
   const handleSaveProfile = (e) => {
     e.preventDefault();
-    localStorage.setItem("customerName", userName.trim());
-    localStorage.setItem("customerPhone", userPhone.trim());
+    const cleanName = userName.trim();
+    const cleanPhone = userPhone.trim();
+
+    localStorage.setItem("customerName", cleanName);
+    localStorage.setItem("customerPhone", cleanPhone);
     localStorage.setItem("savedAddresses", JSON.stringify(addresses));
+
+    // 1. Notificar mediante callback si viene como prop
+    if (onUpdateUser) {
+      onUpdateUser({ name: cleanName, phone: cleanPhone });
+    }
+
+    // 2. Disparar un evento personalizado para que el NavMenu/Header reaccione al instante
+    window.dispatchEvent(
+      new CustomEvent("userProfileUpdated", {
+        detail: { name: cleanName, phone: cleanPhone },
+      }),
+    );
 
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);

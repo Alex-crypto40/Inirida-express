@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Package,
   Settings,
@@ -20,6 +20,47 @@ export const NavMenu = ({
   usuario,
 }) => {
   const menuRef = useRef(null);
+
+  // ============================================================
+  // ESTADO LOCAL DE USUARIO (Sincronizado con localStorage y Props)
+  // ============================================================
+  const [nombreLocal, setNombreLocal] = useState(() => {
+    return usuario?.nombre || localStorage.getItem("customerName") || "";
+  });
+
+  const [telefonoLocal, setTelefonoLocal] = useState(() => {
+    return usuario?.telefono || localStorage.getItem("customerPhone") || "";
+  });
+
+  // Sincronizar si cambian las props directamente
+  useEffect(() => {
+    if (usuario?.nombre) setNombreLocal(usuario.nombre);
+    if (usuario?.telefono) setTelefonoLocal(usuario.telefono);
+  }, [usuario]);
+
+  // Escuchar eventos de actualización en tiempo real desde UserProfileModal
+  useEffect(() => {
+    const syncUserData = () => {
+      const storedName = localStorage.getItem("customerName");
+      const storedPhone = localStorage.getItem("customerPhone");
+      if (storedName !== null) setNombreLocal(storedName);
+      if (storedPhone !== null) setTelefonoLocal(storedPhone);
+    };
+
+    const handleCustomUpdate = (event) => {
+      if (event.detail?.name !== undefined) setNombreLocal(event.detail.name);
+      if (event.detail?.phone !== undefined)
+        setTelefonoLocal(event.detail.phone);
+    };
+
+    window.addEventListener("userProfileUpdated", handleCustomUpdate);
+    window.addEventListener("storage", syncUserData);
+
+    return () => {
+      window.removeEventListener("userProfileUpdated", handleCustomUpdate);
+      window.removeEventListener("storage", syncUserData);
+    };
+  }, []);
 
   // ============================================================
   // CERRAR CON ESCAPE
@@ -64,11 +105,11 @@ export const NavMenu = ({
   // ============================================================
   // DATOS DEL USUARIO
   // ============================================================
-  const tieneNombre = Boolean(usuario?.nombre?.trim());
+  const tieneNombre = Boolean(nombreLocal?.trim());
 
   const nombreOMovil = tieneNombre
-    ? usuario.nombre
-    : usuario?.telefono || "Cliente Inírida";
+    ? nombreLocal
+    : telefonoLocal || "Cliente Inírida";
 
   // ============================================================
   // HANDLERS
@@ -349,9 +390,9 @@ export const NavMenu = ({
                   {nombreOMovil}
                 </h3>
 
-                {usuario?.telefono && tieneNombre && (
+                {telefonoLocal && tieneNombre && (
                   <p className="text-[9px] text-slate-400 mt-0.5 truncate">
-                    {usuario.telefono}
+                    {telefonoLocal}
                   </p>
                 )}
               </div>
