@@ -9,7 +9,8 @@ import { OrderHistory } from "../components/OrderHistory";
 import { UserProfileModal } from "../components/UserProfileModal";
 import Navbar from "../components/Navbar";
 
-function Home({ socket }) {
+// 1. Recibimos cliente, setCliente y onLogoutCliente desde App.jsx
+function Home({ socket, cliente, setCliente, onLogoutCliente }) {
   const [stores, setStores] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
@@ -44,6 +45,10 @@ function Home({ socket }) {
     { id: "hotel", label: "Hoteles", icon: "🏨" },
     { id: "mandados", label: "Mandados", icon: "🛵" },
   ];
+
+  // Identificador visual del usuario para el saludo
+  const nombreSaludo =
+    cliente?.nombre?.trim()?.split(" ")[0] || cliente?.telefono;
 
   // 1. RECUPERAR CARRERA ACTIVA AL CARGAR / RECARGAR LA PÁGINA
   useEffect(() => {
@@ -197,14 +202,19 @@ function Home({ socket }) {
   };
 
   const cerrarSesion = () => {
-    localStorage.removeItem("token");
-    localStorage.removeItem("activeOrderId");
-    window.location.reload();
+    if (onLogoutCliente) {
+      onLogoutCliente();
+    } else {
+      localStorage.removeItem("current_client");
+      localStorage.removeItem("token");
+      localStorage.removeItem("activeOrderId");
+      window.location.reload();
+    }
   };
 
   return (
     <div className="relative max-w-md mx-auto bg-slate-50 min-h-screen flex flex-col shadow-2xl overflow-x-hidden antialiased font-sans">
-      {/* 1. NAVBAR INTEGRADO */}
+      {/* 1. NAVBAR INTEGRADO - Pasamos usuario (cliente) */}
       <Navbar
         activeTab={categoriaSeleccionada}
         setMostrarHistorial={setMostrarHistorial}
@@ -212,15 +222,16 @@ function Home({ socket }) {
         irAFormularioComercio={irAFormularioComercio}
         irAFormularioRepartidor={irAFormularioRepartidor}
         cerrarSesion={cerrarSesion}
+        usuario={cliente}
       />
 
       {/* BANNER BIENVENIDA Y ESTADO EN VIVO (HERO UX) */}
       <div className="px-4 pt-3 pb-1 flex items-center justify-between">
         <div>
           <p className="text-[11px] font-bold tracking-wider uppercase text-orange-600">
-            Hola 👋
+            {nombreSaludo ? `Hola, ${nombreSaludo} 👋` : "Hola 👋"}
           </p>
-          <h1 className="text-lg font-black text-slate-800 tracking-tight">
+          <h1 className="text-s font-black text-slate-800 tracking-tight">
             ¿Qué necesitas hoy?
           </h1>
         </div>
@@ -456,6 +467,7 @@ function Home({ socket }) {
       {mostrarHistorial && (
         <OrderHistory
           customerId={
+            cliente?.telefono ||
             localStorage.getItem("customerPhone") ||
             activeOrder?.customerPhone ||
             "573143077813"
@@ -465,9 +477,13 @@ function Home({ socket }) {
         />
       )}
 
-      {/* MODAL DE PERFIL DE USUARIO */}
+      {/* MODAL DE PERFIL DE USUARIO - Pasamos el cliente y la función para actualizarlo */}
       {mostrarPerfil && (
-        <UserProfileModal onClose={() => setMostrarPerfil(false)} />
+        <UserProfileModal
+          usuario={cliente}
+          setCliente={setCliente}
+          onClose={() => setMostrarPerfil(false)}
+        />
       )}
     </div>
   );

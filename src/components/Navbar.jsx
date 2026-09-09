@@ -1,15 +1,6 @@
 import { useContext, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Menu,
-  ShoppingCart,
-  X,
-  Plus,
-  Minus,
-  Trash2,
-  UserRound,
-  Sparkles,
-} from "lucide-react";
+import { Menu, ShoppingCart, X, Plus, Minus, Trash2 } from "lucide-react";
 
 import { CartContext } from "../context/CartContext";
 import { NavMenu } from "./NavMenu";
@@ -83,13 +74,14 @@ function Navbar({
           ======================================================== */}
       <header
         className="
-          sticky top-0 z-40
-          w-full max-w-md mx-auto
-          text-white
-          bg-gradient-to-r from-orange-500 via-orange-500 to-orange-600
-          shadow-lg shadow-orange-900/10
-          relative
-        "
+    sticky top-1 z-40
+    w-[95%] max-w-xl mx-auto
+    text-white
+    bg-gradient-to-r from-orange-500 via-orange-500 to-orange-600
+    shadow-xl shadow-orange-900/20
+    rounded-2xl
+    relative
+  "
       >
         {/* ======================================================
             FILA PRINCIPAL
@@ -246,79 +238,6 @@ function Navbar({
               ) : (
                 <Menu className="w-[20px] h-[20px]" />
               )}
-            </button>
-          </div>
-        </div>
-
-        {/* ======================================================
-            RESUMEN DEL USUARIO
-            ====================================================== */}
-        <div className="px-3 pb-2.5">
-          <div
-            className="
-              rounded-xl
-              bg-orange-700/35
-              border border-white/10
-              px-3
-              py-2
-              flex items-center justify-between
-              gap-2
-              backdrop-blur-sm
-            "
-          >
-            {/* ESTADO + SALUDO */}
-            <div className="flex items-center gap-2 min-w-0">
-              <div
-                className="
-                  w-7 h-7
-                  shrink-0
-                  rounded-lg
-                  bg-white/15
-                  border border-white/10
-                  flex items-center justify-center
-                "
-              >
-                <UserRound className="w-3.5 h-3.5 text-white" />
-              </div>
-
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 shadow-[0_0_6px_rgba(110,231,183,0.8)]" />
-
-                  <p className="text-[10px] font-bold text-white truncate">
-                    Hola, Cliente 👋
-                  </p>
-                </div>
-
-                <p className="text-[8px] text-orange-100/90 mt-0.5 truncate">
-                  Disfruta de nuestros servicios
-                </p>
-              </div>
-            </div>
-
-            {/* ACCESO AL PERFIL */}
-            <button
-              type="button"
-              onClick={() => {
-                setMenuAbierto(false);
-                setMostrarPerfil(true);
-              }}
-              className="
-                shrink-0
-                px-2.5
-                py-1.5
-                rounded-lg
-                bg-white/15
-                hover:bg-white/25
-                border border-white/10
-                text-[9px]
-                font-bold
-                transition-all
-                active:scale-95
-                cursor-pointer
-              "
-            >
-              Ver perfil
             </button>
           </div>
         </div>

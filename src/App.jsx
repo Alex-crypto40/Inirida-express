@@ -57,7 +57,17 @@ function Repartidores() {
 function App() {
   const [socket, setSocket] = useState(null);
 
-  // Estado del conductor autenticado (recuperado de localStorage al iniciar/recargar)
+  // 1. ESTADO PARA EL CLIENTE/USUARIO DE LA APP (Recuperado de localStorage)
+  const [cliente, setCliente] = useState(() => {
+    try {
+      const clienteGuardado = localStorage.getItem("current_client");
+      return clienteGuardado ? JSON.parse(clienteGuardado) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  // Estado del conductor autenticado
   const [driver, setDriver] = useState(() => {
     try {
       const savedDriver = localStorage.getItem("current_driver");
@@ -69,7 +79,7 @@ function App() {
 
   useEffect(() => {
     const newSocket = io(SOCKET_URL, {
-      transports: ["websocket", "polling"], // 🟢 Priorizar WebSocket directo
+      transports: ["websocket", "polling"],
       secure: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -84,10 +94,26 @@ function App() {
     };
   }, []);
 
+  // Función para actualizar los datos del cliente desde Login o Perfil
+  const actualizarCliente = (nuevosDatos) => {
+    setCliente(nuevosDatos);
+    if (nuevosDatos) {
+      localStorage.setItem("current_client", JSON.stringify(nuevosDatos));
+    } else {
+      localStorage.removeItem("current_client");
+    }
+  };
+
   const handleLogout = () => {
     localStorage.removeItem("current_driver");
     setDriver(null);
     window.location.href = "/driver-login";
+  };
+
+  // Logout específico para el Cliente
+  const handleClientLogout = () => {
+    localStorage.removeItem("current_client");
+    setCliente(null);
   };
 
   return (
@@ -95,8 +121,21 @@ function App() {
       <div className="bg-gray-50 min-h-screen flex flex-col w-full">
         <main className="max-w-md w-full mx-auto flex-1 overflow-x-hidden">
           <Routes>
-            <Route path="/" element={<Home socket={socket} />} />
-            <Route path="/login" element={<Login />} />
+            <Route
+              path="/"
+              element={
+                <Home
+                  socket={socket}
+                  cliente={cliente}
+                  setCliente={actualizarCliente}
+                  onLogoutCliente={handleClientLogout}
+                />
+              }
+            />
+            <Route
+              path="/login"
+              element={<Login setCliente={actualizarCliente} />}
+            />
             <Route path="/unete-repartidor" element={<Repartidores />} />
             <Route path="/store/:id" element={<StoreDetail />} />
             <Route
